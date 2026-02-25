@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Billing - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/billing">Billing</a>
+            <a href="/api/user/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Billing</h1>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Current Month</h3>
+                <p class="stat-value" id="current-month">-</p>
+                <p class="stat-label" id="monthly-period">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>Monthly Cost</h3>
+                <p class="stat-value" id="monthly-cost">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>All-Time Cost</h3>
+                <p class="stat-value" id="total-cost">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Requests</h3>
+                <p class="stat-value" id="total-requests">Loading...</p>
+            </div>
+        </div>
+
+        <h2>Cost Breakdown</h2>
+        <div class="table-container">
+            <table id="billing-table">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Input Tokens</th>
+                        <th>Output Tokens</th>
+                        <th>Requests</th>
+                        <th>Cost (USD)</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+    <script>
+        async function loadBilling() {
+            try {
+                const [billingRes, usageRes] = await Promise.all([
+                    fetch('/api/user/billing'),
+                    fetch('/api/user/usage')
+                ]);
+
+                const billing = await billingRes.json();
+                const usage = await usageRes.json();
+
+                document.getElementById('monthly-period').textContent = billing.current_month.period;
+                document.getElementById('monthly-cost').textContent = '$' + billing.current_month.cost.toFixed(4);
+                document.getElementById('total-cost').textContent = '$' + billing.all_time.cost.toFixed(4);
+                document.getElementById('total-requests').textContent = billing.all_time.requests.toLocaleString();
+
+                // Update billing table
+                const tbody = document.querySelector('#billing-table tbody');
+                tbody.innerHTML = '';
+
+                if (usage.by_model.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5">No usage data yet.</td></tr>';
+                    return;
+                }
+
+                usage.by_model.forEach(row => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${row.model_name}</td>
+                            <td>${row.input_tokens.toLocaleString()}</td>
+                            <td>${row.output_tokens.toLocaleString()}</td>
+                            <td>${row.request_count.toLocaleString()}</td>
+                            <td>$${row.cost_usd.toFixed(4)}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load billing:', error);
+            }
+        }
+
+        loadBilling();
+    </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            {{if .User}}
+            {{if .User.IsAdmin}}
+            <a href="/admin/dashboard">Admin</a>
+            {{end}}
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/billing">Billing</a>
+            <a href="/api/user/logout">Logout</a>
+            {{else}}
+            <a href="/login">Login</a>
+            <a href="/register">Register</a>
+            {{end}}
+        </div>
+    </nav>
+    <main class="container">
+        {{.Content}}
+    </main>
+    <footer>
+        <p>LLM Gateway - API Proxy for LLM Services</p>
+    </footer>
+</body>
+</html>

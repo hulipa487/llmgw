@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Dashboard - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/billing">Billing</a>
+            <a href="/api/user/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Dashboard</h1>
+        <p>Welcome, {{.User.Username}}!</p>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Input Tokens</h3>
+                <p class="stat-value" id="input-tokens">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>Output Tokens</h3>
+                <p class="stat-value" id="output-tokens">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Cost</h3>
+                <p class="stat-value" id="total-cost">Loading...</p>
+            </div>
+            <div class="stat-card">
+                <h3>This Month</h3>
+                <p class="stat-value" id="monthly-cost">Loading...</p>
+            </div>
+        </div>
+
+        <h2>Usage by Model</h2>
+        <div class="table-container">
+            <table id="model-usage-table">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Input Tokens</th>
+                        <th>Output Tokens</th>
+                        <th>Requests</th>
+                        <th>Cost (USD)</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <h2>Daily Usage (Last 30 Days)</h2>
+        <div class="chart-container">
+            <canvas id="daily-chart"></canvas>
+        </div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        async function loadUsage() {
+            try {
+                const response = await fetch('/api/user/usage');
+                const data = await response.json();
+
+                // Update stats
+                document.getElementById('input-tokens').textContent = data.totals.input_tokens.toLocaleString();
+                document.getElementById('output-tokens').textContent = data.totals.output_tokens.toLocaleString();
+                document.getElementById('total-cost').textContent = '$' + data.totals.cost_usd.toFixed(4);
+
+                // Update model usage table
+                const tbody = document.querySelector('#model-usage-table tbody');
+                tbody.innerHTML = '';
+                data.by_model.forEach(row => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${row.model_name}</td>
+                            <td>${row.input_tokens.toLocaleString()}</td>
+                            <td>${row.output_tokens.toLocaleString()}</td>
+                            <td>${row.request_count.toLocaleString()}</td>
+                            <td>$${row.cost_usd.toFixed(4)}</td>
+                        </tr>
+                    `;
+                });
+
+                // Create daily chart
+                const labels = data.daily.map(d => d.date).reverse();
+                const costs = data.daily.map(d => d.cost_usd).reverse();
+
+                new Chart(document.getElementById('daily-chart'), {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Daily Cost (USD)',
+                            data: costs,
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Failed to load usage:', error);
+            }
+        }
+
+        async function loadBilling() {
+            try {
+                const response = await fetch('/api/user/billing');
+                const data = await response.json();
+
+                document.getElementById('monthly-cost').textContent = '$' + data.current_month.cost.toFixed(4);
+            } catch (error) {
+                console.error('Failed to load billing:', error);
+            }
+        }
+
+        loadUsage();
+        loadBilling();
+    </script>
+</body>
+</html>

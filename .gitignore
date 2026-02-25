@@ -1,0 +1,28 @@
+# Binary
+llmgw
+llmgw.exe
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Config (may contain secrets)
+config.json
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+go.work
+go.work.sum

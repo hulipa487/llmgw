@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/admin/dashboard">Dashboard</a>
+            <a href="/admin/models">Models</a>
+            <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/users">Users</a>
+            <a href="/api/admin/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>User Management</h1>
+
+        <div class="table-container">
+            <table id="users-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>API Keys</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+    <script>
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                const users = await response.json();
+
+                const tbody = document.querySelector('#users-table tbody');
+                tbody.innerHTML = '';
+
+                if (users.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5">No users found.</td></tr>';
+                    return;
+                }
+
+                users.forEach(u => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${u.id}</td>
+                            <td>${u.username}</td>
+                            <td>${u.email || '-'}</td>
+                            <td>${u.key_count}</td>
+                            <td>${new Date(u.created_at).toLocaleString()}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load users:', error);
+            }
+        }
+
+        loadUsers();
+    </script>
+</body>
+</html>

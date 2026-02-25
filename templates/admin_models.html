@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Management - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/admin/dashboard">Dashboard</a>
+            <a href="/admin/models">Models</a>
+            <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/users">Users</a>
+            <a href="/api/admin/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Model Management</h1>
+
+        <div class="card">
+            <h2>Create New Model</h2>
+            <form id="create-model-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="model-name">Model Name (Gateway)</label>
+                        <input type="text" id="model-name" name="name" required placeholder="e.g., gpt-4, claude-3-opus">
+                    </div>
+                    <div class="form-group">
+                        <label for="price-input">Price per 1M Input Tokens ($)</label>
+                        <input type="number" id="price-input" name="price_input_per_m" step="0.0001" value="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="price-output">Price per 1M Output Tokens ($)</label>
+                        <input type="number" id="price-output" name="price_output_per_m" step="0.0001" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="model-enabled" name="is_enabled" checked>
+                            Enabled
+                        </label>
+                    </div>
+                </div>
+                <h3>Upstreams</h3>
+                <div id="upstreams-container"></div>
+                <button type="button" class="btn btn-secondary" onclick="addUpstreamRow()">Add Upstream</button>
+                <br><br>
+                <button type="submit" class="btn btn-primary">Create Model</button>
+            </form>
+        </div>
+
+        <h2>Configured Models</h2>
+        <div class="table-container">
+            <table id="models-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Upstreams</th>
+                        <th>Input Price ($/1M)</th>
+                        <th>Output Price ($/1M)</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Edit Model Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <h2>Edit Model</h2>
+            <form id="edit-model-form">
+                <input type="hidden" id="edit-model-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-model-name">Model Name</label>
+                        <input type="text" id="edit-model-name" name="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-price-input">Price per 1M Input ($)</label>
+                        <input type="number" id="edit-price-input" name="price_input_per_m" step="0.0001">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-price-output">Price per 1M Output ($)</label>
+                        <input type="number" id="edit-price-output" name="price_output_per_m" step="0.0001">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="edit-model-enabled" name="is_enabled">
+                            Enabled
+                        </label>
+                    </div>
+                </div>
+                <h3>Upstreams</h3>
+                <div id="edit-upstreams-container"></div>
+                <button type="button" class="btn btn-secondary" onclick="addEditUpstreamRow()">Add Upstream</button>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let upstreams = [];
+
+        async function loadUpstreams() {
+            try {
+                const response = await fetch('/api/admin/upstreams');
+                upstreams = await response.json();
+                updateUpstreamDropdowns();
+            } catch (error) {
+                console.error('Failed to load upstreams:', error);
+            }
+        }
+
+        function updateUpstreamDropdowns() {
+            document.querySelectorAll('.upstream-select').forEach(select => {
+                const currentValue = select.value;
+                select.innerHTML = '<option value="">Select upstream...</option>';
+                upstreams.forEach(u => {
+                    select.innerHTML += `<option value="${u.id}">${u.name || u.upstream_id}</option>`;
+                });
+                if (currentValue) select.value = currentValue;
+            });
+        }
+
+        function addUpstreamRow(upstreamId = '', modelName = '') {
+            const container = document.getElementById('upstreams-container');
+            const row = document.createElement('div');
+            row.className = 'upstream-row';
+            row.style.cssText = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;';
+            row.innerHTML = `
+                <select class="upstream-select" style="flex: 1;" onchange="updateUpstreamDropdowns()">
+                    <option value="">Select upstream...</option>
+                </select>
+                <input type="text" class="upstream-model-name" placeholder="Model name for upstream" value="${modelName}" style="flex: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px;">
+                <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            container.appendChild(row);
+            updateUpstreamDropdowns();
+            if (upstreamId) {
+                row.querySelector('.upstream-select').value = upstreamId;
+            }
+        }
+
+        function addEditUpstreamRow(upstreamId = '', modelName = '') {
+            const container = document.getElementById('edit-upstreams-container');
+            const row = document.createElement('div');
+            row.className = 'upstream-row';
+            row.style.cssText = 'display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;';
+            row.innerHTML = `
+                <select class="upstream-select" style="flex: 1;" onchange="updateUpstreamDropdowns()">
+                    <option value="">Select upstream...</option>
+                </select>
+                <input type="text" class="upstream-model-name" placeholder="Model name for upstream" value="${modelName}" style="flex: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 4px;">
+                <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            container.appendChild(row);
+            updateUpstreamDropdowns();
+            if (upstreamId) {
+                row.querySelector('.upstream-select').value = upstreamId;
+            }
+        }
+
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/admin/models');
+                const models = await response.json();
+
+                const tbody = document.querySelector('#models-table tbody');
+                tbody.innerHTML = '';
+
+                if (models.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No models configured yet. Add an upstream first, then create a model.</td></tr>';
+                    return;
+                }
+
+                models.forEach(m => {
+                    const status = m.is_enabled
+                        ? '<span class="badge badge-success">Enabled</span>'
+                        : '<span class="badge badge-danger">Disabled</span>';
+
+                    const upstreamsList = (m.upstreams || []).map(u => u.name || u.upstream_id).join(', ') || 'None';
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${m.name}</td>
+                            <td>${upstreamsList}</td>
+                            <td>$${m.price_input_per_m.toFixed(4)}</td>
+                            <td>$${m.price_output_per_m.toFixed(4)}</td>
+                            <td>${status}</td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="editModel(${m.id})">Edit</button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteModel(${m.id})">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load models:', error);
+            }
+        }
+
+        document.getElementById('create-model-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const upstreamInputs = [];
+            document.querySelectorAll('#upstreams-container .upstream-row').forEach(row => {
+                const upstreamId = row.querySelector('.upstream-select').value;
+                const modelName = row.querySelector('.upstream-model-name').value;
+                if (upstreamId && modelName) {
+                    upstreamInputs.push({ upstream_id: parseInt(upstreamId), upstream_model_name: modelName });
+                }
+            });
+
+            const data = {
+                name: document.getElementById('model-name').value,
+                price_input_per_m: parseFloat(document.getElementById('price-input').value) || 0,
+                price_output_per_m: parseFloat(document.getElementById('price-output').value) || 0,
+                is_enabled: document.getElementById('model-enabled').checked,
+                upstreams: upstreamInputs
+            };
+
+            try {
+                const response = await fetch('/api/admin/models', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    loadModels();
+                    e.target.reset();
+                    document.getElementById('model-enabled').checked = true;
+                    document.getElementById('upstreams-container').innerHTML = '';
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to create model');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        });
+
+        async function editModel(id) {
+            const models = await (await fetch('/api/admin/models')).json();
+            const model = models.find(m => m.id === id);
+            if (!model) return;
+
+            document.getElementById('edit-model-id').value = model.id;
+            document.getElementById('edit-model-name').value = model.name;
+            document.getElementById('edit-price-input').value = model.price_input_per_m;
+            document.getElementById('edit-price-output').value = model.price_output_per_m;
+            document.getElementById('edit-model-enabled').checked = model.is_enabled;
+
+            // Load upstream associations
+            document.getElementById('edit-upstreams-container').innerHTML = '';
+            // Need to fetch model with upstream details - for now use the model's upstreams
+            if (model.upstreams && model.upstreams.length > 0) {
+                for (const us of model.upstreams) {
+                    addEditUpstreamRow(us.id, us.name || '');
+                }
+            }
+
+            document.getElementById('edit-modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('edit-modal').style.display = 'none';
+        }
+
+        document.getElementById('edit-model-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('edit-model-id').value;
+
+            const upstreamInputs = [];
+            document.querySelectorAll('#edit-upstreams-container .upstream-row').forEach(row => {
+                const upstreamId = row.querySelector('.upstream-select').value;
+                const modelName = row.querySelector('.upstream-model-name').value;
+                if (upstreamId && modelName) {
+                    upstreamInputs.push({ upstream_id: parseInt(upstreamId), upstream_model_name: modelName });
+                }
+            });
+
+            const data = {
+                name: document.getElementById('edit-model-name').value,
+                price_input_per_m: parseFloat(document.getElementById('edit-price-input').value) || 0,
+                price_output_per_m: parseFloat(document.getElementById('edit-price-output').value) || 0,
+                is_enabled: document.getElementById('edit-model-enabled').checked,
+                upstreams: upstreamInputs
+            };
+
+            try {
+                const response = await fetch(`/api/admin/models/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    closeModal();
+                    loadModels();
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to update model');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        });
+
+        async function deleteModel(id) {
+            if (!confirm('Are you sure you want to delete this model?')) return;
+
+            try {
+                const response = await fetch(`/api/admin/models/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    loadModels();
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to delete model');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        }
+
+        // Close modal on outside click
+        window.onclick = (e) => {
+            if (e.target === document.getElementById('edit-modal')) {
+                closeModal();
+            }
+        };
+
+        loadUpstreams();
+        loadModels();
+    </script>
+</body>
+</html>

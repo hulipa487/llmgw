@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Keys - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/billing">Billing</a>
+            <a href="/api/user/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>API Keys</h1>
+
+        <div class="card">
+            <h2>Create New API Key</h2>
+            <form id="create-key-form">
+                <div class="form-group">
+                    <label for="key-name">Key Name (optional)</label>
+                    <input type="text" id="key-name" name="name" placeholder="e.g., Production, Development">
+                </div>
+                <button type="submit" class="btn btn-primary">Generate API Key</button>
+            </form>
+            <div id="new-key-display" class="alert alert-success" style="display: none;">
+                <strong>Save this key! It will only be shown once:</strong>
+                <code id="new-key-value"></code>
+            </div>
+        </div>
+
+        <h2>Your API Keys</h2>
+        <div class="table-container">
+            <table id="keys-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Key Prefix</th>
+                        <th>Created</th>
+                        <th>Last Used</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+    <script>
+        async function loadKeys() {
+            try {
+                const response = await fetch('/api/user/keys');
+                const keys = await response.json();
+
+                const tbody = document.querySelector('#keys-table tbody');
+                tbody.innerHTML = '';
+
+                if (keys.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No API keys yet. Create one above!</td></tr>';
+                    return;
+                }
+
+                keys.forEach(key => {
+                    const lastUsed = key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never';
+                    const status = key.is_active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-danger">Revoked</span>';
+
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${key.name || '-'}</td>
+                            <td><code>${key.key_prefix}...</code></td>
+                            <td>${new Date(key.created_at).toLocaleString()}</td>
+                            <td>${lastUsed}</td>
+                            <td>${status}</td>
+                            <td>
+                                ${key.is_active ? `<button class="btn btn-danger btn-sm" onclick="revokeKey(${key.id})">Revoke</button>` : ''}
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load keys:', error);
+            }
+        }
+
+        document.getElementById('create-key-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('key-name').value;
+
+            try {
+                const response = await fetch('/api/user/keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('new-key-value').textContent = data.key;
+                    document.getElementById('new-key-display').style.display = 'block';
+                    document.getElementById('key-name').value = '';
+                    loadKeys();
+                } else {
+                    alert(data.error || 'Failed to create key');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        });
+
+        async function revokeKey(keyId) {
+            if (!confirm('Are you sure you want to revoke this key? This cannot be undone.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/user/keys/${keyId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    loadKeys();
+                } else {
+                    const data = await response.json();
+                    alert(data.error || 'Failed to revoke key');
+                }
+            } catch (error) {
+                alert('Network error: ' + error.message);
+            }
+        }
+
+        loadKeys();
+    </script>
+</body>
+</html>

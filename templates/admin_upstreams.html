@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upstreams - LLM Gateway Admin</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/admin/dashboard">Dashboard</a>
+            <a href="/admin/models">Models</a>
+            <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/users">Users</a>
+            <a href="/api/admin/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h1>Upstreams</h1>
+            <button class="btn btn-primary" onclick="showCreateModal()">Add Upstream</button>
+        </div>
+
+        <div class="table-container">
+            <table id="upstreams-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Base URL</th>
+                        <th>OpenAI Path</th>
+                        <th>Anthropic Path</th>
+                        <th>Has Key</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- Create/Edit Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <h2 id="modal-title">Add Upstream</h2>
+            <form id="upstreamForm">
+                <input type="hidden" id="upstream-db-id">
+                <div class="form-group">
+                    <label for="upstream_id">Upstream ID</label>
+                    <input type="text" id="upstream_id" name="upstream_id" required placeholder="e.g., openai-main">
+                </div>
+                <div class="form-group">
+                    <label for="name">Display Name</label>
+                    <input type="text" id="name" name="name" placeholder="e.g., OpenAI Main">
+                </div>
+                <div class="form-group">
+                    <label for="base_url">Base URL</label>
+                    <input type="text" id="base_url" name="base_url" required placeholder="e.g., https://api.openai.com">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="openai_path">OpenAI Path</label>
+                        <input type="text" id="openai_path" name="openai_path" placeholder="e.g., /v1" value="/v1">
+                    </div>
+                    <div class="form-group">
+                        <label for="anthropic_path">Anthropic Path</label>
+                        <input type="text" id="anthropic_path" name="anthropic_path" placeholder="e.g., /v1" value="/v1">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="key">API Key</label>
+                    <input type="text" id="key" name="key" required placeholder="API key">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let editingId = null;
+
+        async function loadUpstreams() {
+            try {
+                const response = await fetch('/api/admin/upstreams');
+                const upstreams = await response.json();
+
+                const tbody = document.querySelector('#upstreams-table tbody');
+                tbody.innerHTML = '';
+
+                if (upstreams.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No upstreams configured.</td></tr>';
+                    return;
+                }
+
+                upstreams.forEach(u => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${u.name || u.upstream_id}</td>
+                            <td><code>${u.base_url}</code></td>
+                            <td><code>${u.openai_path || '/v1'}</code></td>
+                            <td><code>${u.anthropic_path || '/v1'}</code></td>
+                            <td>${u.key ? 'Yes' : 'No'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-secondary" onclick="editUpstream(${u.id}, '${u.upstream_id}', '${u.name || ''}', '${u.base_url}', '${u.openai_path || '/v1'}', '${u.anthropic_path || '/v1'}')">Edit</button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteUpstream(${u.id})">Delete</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load upstreams:', error);
+            }
+        }
+
+        function showCreateModal() {
+            editingId = null;
+            document.getElementById('modal-title').textContent = 'Add Upstream';
+            document.getElementById('upstreamForm').reset();
+            document.getElementById('upstream-db-id').value = '';
+            document.getElementById('openai_path').value = '/v1';
+            document.getElementById('anthropic_path').value = '/v1';
+            document.getElementById('key').required = true;
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function editUpstream(id, upstreamId, name, baseUrl, openaiPath, anthropicPath) {
+            editingId = id;
+            document.getElementById('modal-title').textContent = 'Edit Upstream';
+            document.getElementById('upstream-db-id').value = id;
+            document.getElementById('upstream_id').value = upstreamId;
+            document.getElementById('name').value = name;
+            document.getElementById('base_url').value = baseUrl;
+            document.getElementById('openai_path').value = openaiPath;
+            document.getElementById('anthropic_path').value = anthropicPath;
+            document.getElementById('key').value = '';
+            document.getElementById('key').required = false;
+            document.getElementById('modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+            document.getElementById('key').required = true;
+        }
+
+        document.getElementById('upstreamForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const data = {
+                upstream_id: document.getElementById('upstream_id').value,
+                name: document.getElementById('name').value,
+                base_url: document.getElementById('base_url').value,
+                openai_path: document.getElementById('openai_path').value || '/v1',
+                anthropic_path: document.getElementById('anthropic_path').value || '/v1',
+                key: document.getElementById('key').value,
+            };
+
+            try {
+                let response;
+                if (editingId) {
+                    // Update
+                    const updateData = { ...data };
+                    if (!updateData.key) delete updateData.key;
+                    response = await fetch(`/api/admin/upstreams/${editingId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updateData)
+                    });
+                } else {
+                    // Create
+                    response = await fetch('/api/admin/upstreams', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                }
+
+                if (response.ok) {
+                    closeModal();
+                    loadUpstreams();
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to save upstream');
+                }
+            } catch (error) {
+                alert('An error occurred');
+            }
+        });
+
+        async function deleteUpstream(id) {
+            if (!confirm('Are you sure you want to delete this upstream? This will also remove its associations with models.')) return;
+
+            try {
+                const response = await fetch(`/api/admin/upstreams/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    loadUpstreams();
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to delete upstream');
+                }
+            } catch (error) {
+                alert('An error occurred');
+            }
+        }
+
+        // Close modal on outside click
+        window.onclick = (e) => {
+            if (e.target === document.getElementById('modal')) {
+                closeModal();
+            }
+        };
+
+        loadUpstreams();
+    </script>
+</body>
+</html>
