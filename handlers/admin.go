@@ -285,6 +285,17 @@ func DeleteModel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Model deleted"})
 }
 
+// UpstreamResponse represents upstream in API response (without key)
+type UpstreamResponse struct {
+	ID            uint   `json:"id"`
+	UpstreamID    string `json:"upstream_id"`
+	Name          string `json:"name"`
+	BaseURL       string `json:"base_url"`
+	OpenAIPath    string `json:"openai_path"`
+	AnthropicPath string `json:"anthropic_path"`
+	HasKey        bool   `json:"has_key"`
+}
+
 // ListUpstreams lists all upstreams
 func ListUpstreams(c *gin.Context) {
 	var upstreams []models.UpstreamConfig
@@ -293,7 +304,20 @@ func ListUpstreams(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, upstreams)
+	var result []UpstreamResponse
+	for _, u := range upstreams {
+		result = append(result, UpstreamResponse{
+			ID:            u.ID,
+			UpstreamID:    u.UpstreamID,
+			Name:          u.Name,
+			BaseURL:       u.BaseURL,
+			OpenAIPath:    u.OpenAIPath,
+			AnthropicPath: u.AnthropicPath,
+			HasKey:        u.Key != "",
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // CreateUpstreamRequest represents upstream creation request

@@ -171,12 +171,17 @@ func AnthropicMessages(c *gin.Context) {
 	// Write response
 	c.Writer.Write(respBody)
 
-	// Parse usage for logging
-	var anthropicResp AnthropicMessagesResponse
-	if err := json.Unmarshal(respBody, &anthropicResp); err == nil {
-		logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
-			anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens,
-			latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
+	// Only log usage if request was successful (2xx status)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Parse usage for logging
+		var anthropicResp AnthropicMessagesResponse
+		if err := json.Unmarshal(respBody, &anthropicResp); err == nil {
+			if anthropicResp.Usage.InputTokens > 0 || anthropicResp.Usage.OutputTokens > 0 {
+				logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
+					anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens,
+					latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
+			}
+		}
 	}
 }
 

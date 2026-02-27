@@ -212,12 +212,17 @@ func OpenAIChatCompletions(c *gin.Context) {
 	// Write response
 	c.Writer.Write(respBody)
 
-	// Parse usage for logging
-	var openaiResp OpenAIChatResponse
-	if err := json.Unmarshal(respBody, &openaiResp); err == nil {
-		logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
-			openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens,
-			latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
+	// Only log usage if request was successful (2xx status)
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Parse usage for logging
+		var openaiResp OpenAIChatResponse
+		if err := json.Unmarshal(respBody, &openaiResp); err == nil {
+			if openaiResp.Usage.PromptTokens > 0 || openaiResp.Usage.CompletionTokens > 0 {
+				logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
+					openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens,
+					latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
+			}
+		}
 	}
 }
 

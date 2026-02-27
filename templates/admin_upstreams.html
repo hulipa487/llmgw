@@ -100,19 +100,26 @@
                 }
 
                 upstreams.forEach(u => {
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${u.name || u.upstream_id}</td>
-                            <td><code>${u.base_url}</code></td>
-                            <td><code>${u.openai_path || '/v1'}</code></td>
-                            <td><code>${u.anthropic_path || '/v1'}</code></td>
-                            <td>${u.key ? 'Yes' : 'No'}</td>
-                            <td>
-                                <button class="btn btn-sm btn-secondary" onclick="editUpstream(${u.id}, '${u.upstream_id}', '${u.name || ''}', '${u.base_url}', '${u.openai_path || '/v1'}', '${u.anthropic_path || '/v1'}')">Edit</button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteUpstream(${u.id})">Delete</button>
-                            </td>
-                        </tr>
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${u.name || u.upstream_id}</td>
+                        <td><code>${u.base_url}</code></td>
+                        <td><code>${u.openai_path || '/v1'}</code></td>
+                        <td><code>${u.anthropic_path || '/v1'}</code></td>
+                        <td>${u.has_key ? 'Yes' : 'No'}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary" data-upstream='${JSON.stringify(u)}'>Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteUpstream(${u.id})">Delete</button>
+                        </td>
                     `;
+                    tbody.appendChild(tr);
+
+                    // Add click handler for edit button
+                    const editBtn = tr.querySelector('.btn-secondary');
+                    editBtn.addEventListener('click', function() {
+                        const data = JSON.parse(this.getAttribute('data-upstream'));
+                        editUpstream(data.id, data.upstream_id, data.name || '', data.base_url, data.openai_path || '/v1', data.anthropic_path || '/v1');
+                    });
                 });
             } catch (error) {
                 console.error('Failed to load upstreams:', error);
