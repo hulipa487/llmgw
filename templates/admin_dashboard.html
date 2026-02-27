@@ -15,6 +15,7 @@
             <a href="/admin/dashboard">Dashboard</a>
             <a href="/admin/models">Models</a>
             <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/invites">Invites</a>
             <a href="/admin/users">Users</a>
             <a href="/api/admin/logout">Logout</a>
         </div>
@@ -46,7 +47,7 @@
             <table id="user-usage-table">
                 <thead>
                     <tr>
-                        <th>User</th>
+                        <th>Email</th>
                         <th>Input Tokens</th>
                         <th>Output Tokens</th>
                         <th>Requests</th>
@@ -89,13 +90,13 @@
                 const userTbody = document.querySelector('#user-usage-table tbody');
                 userTbody.innerHTML = '';
 
-                if (data.by_user.length === 0) {
+                if (!data.by_user || data.by_user.length === 0) {
                     userTbody.innerHTML = '<tr><td colspan="5">No usage data yet.</td></tr>';
                 } else {
                     data.by_user.forEach(row => {
                         userTbody.innerHTML += `
                             <tr>
-                                <td>${row.username || 'Unknown'}</td>
+                                <td>${row.email || 'Unknown'}</td>
                                 <td>${row.input_tokens.toLocaleString()}</td>
                                 <td>${row.output_tokens.toLocaleString()}</td>
                                 <td>${row.request_count.toLocaleString()}</td>
@@ -109,7 +110,7 @@
                 const modelTbody = document.querySelector('#model-usage-table tbody');
                 modelTbody.innerHTML = '';
 
-                if (data.by_model.length === 0) {
+                if (!data.by_model || data.by_model.length === 0) {
                     modelTbody.innerHTML = '<tr><td colspan="5">No usage data yet.</td></tr>';
                 } else {
                     data.by_model.forEach(row => {

@@ -15,6 +15,7 @@
             <a href="/admin/dashboard">Dashboard</a>
             <a href="/admin/models">Models</a>
             <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/invites">Invites</a>
             <a href="/admin/users">Users</a>
             <a href="/api/admin/logout">Logout</a>
         </div>
@@ -27,7 +28,6 @@
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Username</th>
                         <th>Email</th>
                         <th>API Keys</th>
                         <th>Created</th>
@@ -47,7 +47,7 @@
                 tbody.innerHTML = '';
 
                 if (users.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5">No users found.</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="4">No users found.</td></tr>';
                     return;
                 }
 
@@ -55,8 +55,7 @@
                     tbody.innerHTML += `
                         <tr>
                             <td>${u.id}</td>
-                            <td>${u.username}</td>
-                            <td>${u.email || '-'}</td>
+                            <td>${u.email}</td>
                             <td>${u.key_count}</td>
                             <td>${new Date(u.created_at).toLocaleString()}</td>
                         </tr>

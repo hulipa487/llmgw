@@ -15,6 +15,7 @@
             <a href="/admin/dashboard">Dashboard</a>
             <a href="/admin/models">Models</a>
             <a href="/admin/upstreams">Upstreams</a>
+            <a href="/admin/invites">Invites</a>
             <a href="/admin/users">Users</a>
             <a href="/api/admin/logout">Logout</a>
         </div>
@@ -192,7 +193,7 @@
                         ? '<span class="badge badge-success">Enabled</span>'
                         : '<span class="badge badge-danger">Disabled</span>';
 
-                    const upstreamsList = (m.upstreams || []).map(u => u.name || u.upstream_id).join(', ') || 'None';
+                    const upstreamsList = (m.upstreams || []).map(u => `${u.name || u.upstream_id} (${u.upstream_model_name})`).join(', ') || 'None';
 
                     tbody.innerHTML += `
                         <tr>
@@ -270,7 +271,7 @@
             // Need to fetch model with upstream details - for now use the model's upstreams
             if (model.upstreams && model.upstreams.length > 0) {
                 for (const us of model.upstreams) {
-                    addEditUpstreamRow(us.id, us.name || '');
+                    addEditUpstreamRow(us.id, us.upstream_model_name || '');
                 }
             }
 

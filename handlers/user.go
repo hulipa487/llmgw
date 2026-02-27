@@ -40,15 +40,15 @@ func generateRandomPassword() (string, error) {
 
 // UserLoginRequest represents login request
 type UserLoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required"`
 }
 
 // UserRegisterRequest represents registration request
 type UserRegisterRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=50"`
-	Password string `json:"password" binding:"required,min=6"`
-	Email    string `json:"email" binding:"required,email"`
+	Email      string `json:"email" binding:"required,email"`
+	Password   string `json:"password" binding:"required,min=6"`
+	InviteCode string `json:"invite_code" binding:"required"`
 }
 
 // CreateAPIKeyRequest represents API key creation request
@@ -65,7 +65,7 @@ func UserLogin(c *gin.Context) {
 	}
 
 	var user models.User
-	if err := models.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+	if err := models.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
@@ -80,9 +80,8 @@ func UserLogin(c *gin.Context) {
 	c.SetCookie("userID", fmt.Sprintf("%d", user.ID), 3600*24*7, "/", "", false, true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Login successful", "user": gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
+		"id":    user.ID,
+		"email": user.Email,
 	}})
 }
 
@@ -94,10 +93,17 @@ func UserRegister(c *gin.Context) {
 		return
 	}
 
-	// Check if username exists
+	// Check invite code
+	var inviteCode models.InviteCode
+	if err := models.DB.Where("code = ? AND used_by IS NULL", req.InviteCode).First(&inviteCode).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or already used invite code"})
+		return
+	}
+
+	// Check if email exists
 	var existingUser models.User
-	if models.DB.Where("username = ?", req.Username).First(&existingUser).Error == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+	if models.DB.Where("email = ?", req.Email).First(&existingUser).Error == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
 		return
 	}
 
@@ -108,21 +114,35 @@ func UserRegister(c *gin.Context) {
 		return
 	}
 
+	// Start transaction
+	tx := models.DB.Begin()
+
 	user := models.User{
-		Username:     req.Username,
-		PasswordHash: string(hashedPassword),
 		Email:        req.Email,
+		PasswordHash: string(hashedPassword),
 	}
 
-	if err := models.DB.Create(&user).Error; err != nil {
+	if err := tx.Create(&user).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
+	// Mark invite code as used
+	now := time.Now()
+	inviteCode.UsedBy = &user.ID
+	inviteCode.UsedAt = &now
+	if err := tx.Save(&inviteCode).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update invite code"})
+		return
+	}
+
+	tx.Commit()
+
 	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "user": gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
+		"id":    user.ID,
+		"email": user.Email,
 	}})
 }
 
@@ -130,12 +150,15 @@ func UserRegister(c *gin.Context) {
 func UserLogout(c *gin.Context) {
 	c.SetCookie("session", "", -1, "/", "", false, true)
 	c.SetCookie("userID", "", -1, "/", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	c.Redirect(http.StatusFound, "/login")
 }
 
 // AdminLogin handles admin login
 func AdminLogin(c *gin.Context) {
-	var req UserLoginRequest
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
@@ -166,12 +189,20 @@ func AdminLogin(c *gin.Context) {
 func AdminLogout(c *gin.Context) {
 	c.SetCookie("adminSession", "", -1, "/", "", false, true)
 	c.SetCookie("adminID", "", -1, "/", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	c.Redirect(http.StatusFound, "/admin/login")
 }
 
 // CreateAPIKey creates a new API key for the user
 func CreateAPIKey(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
+
+	// Check API key limit
+	var activeKeyCount int64
+	models.DB.Model(&models.APIKey{}).Where("user_id = ? AND is_active = ?", user.ID, true).Count(&activeKeyCount)
+	if activeKeyCount >= models.MaxAPIKeysPerUser {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Maximum of %d active API keys allowed", models.MaxAPIKeysPerUser)})
+		return
+	}
 
 	var req CreateAPIKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -259,104 +290,74 @@ func DeleteAPIKey(c *gin.Context) {
 func GetUserUsage(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
 
-	// Get date range from query
-	startDate := c.Query("start_date")
-	endDate := c.Query("end_date")
+	now := time.Now()
+	windowStart := now.Add(-6 * time.Hour)
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
-	query := models.DB.Model(&models.UsageLog{}).Where("user_id = ?", user.ID)
+	// Get request counts
+	var windowRequests, monthRequests int64
+	models.DB.Model(&models.UsageLog{}).
+		Where("user_id = ? AND created_at >= ?", user.ID, windowStart).
+		Count(&windowRequests)
+	models.DB.Model(&models.UsageLog{}).
+		Where("user_id = ? AND created_at >= ?", user.ID, monthStart).
+		Count(&monthRequests)
 
-	if startDate != "" {
-		if t, err := time.Parse("2006-01-02", startDate); err == nil {
-			query = query.Where("created_at >= ?", t)
-		}
-	}
-	if endDate != "" {
-		if t, err := time.Parse("2006-01-02", endDate); err == nil {
-			query = query.Where("created_at <= ?", t.Add(24*time.Hour))
-		}
-	}
-
-	// Get total stats
-	var totalInput, totalOutput int64
-	var totalCost float64
-	query.Select("COALESCE(SUM(input_tokens), 0)").Scan(&totalInput)
-	query.Select("COALESCE(SUM(output_tokens), 0)").Scan(&totalOutput)
-	query.Select("COALESCE(SUM(cost_usd), 0)").Scan(&totalCost)
-
-	// Get usage by model
-	type ModelUsage struct {
+	// Get tokens by model this month
+	type ModelTokens struct {
 		ModelName    string
 		InputTokens  int64
 		OutputTokens int64
-		CostUSD      float64
-		RequestCount int64
 	}
-	var modelUsage []ModelUsage
-	query.Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost_usd) as cost_usd, COUNT(*) as request_count").
+	var modelTokens []ModelTokens
+	models.DB.Model(&models.UsageLog{}).
+		Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens").
+		Where("user_id = ? AND created_at >= ?", user.ID, monthStart).
 		Group("model_name").
-		Scan(&modelUsage)
-
-	// Get daily usage
-	type DailyUsage struct {
-		Date         string
-		InputTokens  int64
-		OutputTokens int64
-		CostUSD      float64
-		RequestCount int64
-	}
-	var dailyUsage []DailyUsage
-	query.Select("DATE(created_at) as date, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost_usd) as cost_usd, COUNT(*) as request_count").
-		Group("DATE(created_at)").
-		Order("date desc").
-		Limit(30).
-		Scan(&dailyUsage)
+		Scan(&modelTokens)
 
 	c.JSON(http.StatusOK, gin.H{
-		"totals": gin.H{
-			"input_tokens":  totalInput,
-			"output_tokens": totalOutput,
-			"cost_usd":      totalCost,
+		"rate_limits": gin.H{
+			"window": gin.H{
+				"limit":     models.RateLimitPerWindow,
+				"used":      windowRequests,
+				"remaining": max(0, models.RateLimitPerWindow-int(windowRequests)),
+				"percent":   float64(windowRequests) / float64(models.RateLimitPerWindow) * 100,
+			},
+			"month": gin.H{
+				"limit":     models.RateLimitPerMonth,
+				"used":      monthRequests,
+				"remaining": max(0, models.RateLimitPerMonth-int(monthRequests)),
+				"percent":   float64(monthRequests) / float64(models.RateLimitPerMonth) * 100,
+			},
 		},
-		"by_model": modelUsage,
-		"daily":    dailyUsage,
+		"tokens_by_model": modelTokens,
 	})
 }
 
-// GetUserBilling gets billing information
-func GetUserBilling(c *gin.Context) {
-	user, _ := middleware.GetCurrentUser(c)
+// GetEnabledModels lists all enabled models for the user
+func GetEnabledModels(c *gin.Context) {
+	var modelList []models.Model
+	if err := models.DB.Where("is_enabled = ?", true).Order("name").Find(&modelList).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch models"})
+		return
+	}
 
-	// Get current month's usage
-	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	var result []gin.H
+	for _, m := range modelList {
+		result = append(result, gin.H{
+			"name": m.Name,
+		})
+	}
 
-	var monthlyCost float64
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ? AND created_at >= ?", user.ID, startOfMonth).
-		Select("COALESCE(SUM(cost_usd), 0)").
-		Scan(&monthlyCost)
+	c.JSON(http.StatusOK, result)
+}
 
-	// Get all-time stats
-	var totalCost float64
-	var totalRequests int64
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ?", user.ID).
-		Select("COALESCE(SUM(cost_usd), 0)").
-		Scan(&totalCost)
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ?", user.ID).
-		Count(&totalRequests)
-
-	c.JSON(http.StatusOK, gin.H{
-		"current_month": gin.H{
-			"cost":   monthlyCost,
-			"period": now.Format("January 2006"),
-		},
-		"all_time": gin.H{
-			"cost":     totalCost,
-			"requests": totalRequests,
-		},
-	})
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // SessionMiddleware extracts session from cookie
@@ -382,4 +383,38 @@ func SessionMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// CheckRateLimit checks if user has exceeded rate limit
+func CheckRateLimit(userID uint) (bool, int, int) {
+	now := time.Now()
+	windowStart := now.Add(-6 * time.Hour)
+
+	var windowCount int64
+	models.DB.Model(&models.UsageLog{}).
+		Where("user_id = ? AND created_at >= ?", userID, windowStart).
+		Count(&windowCount)
+
+	if windowCount >= models.RateLimitPerWindow {
+		return false, int(windowCount), models.RateLimitPerWindow
+	}
+
+	return true, int(windowCount), models.RateLimitPerWindow
+}
+
+// CheckMonthlyLimit checks if user has exceeded monthly limit
+func CheckMonthlyLimit(userID uint) (bool, int, int) {
+	now := time.Now()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+
+	var monthCount int64
+	models.DB.Model(&models.UsageLog{}).
+		Where("user_id = ? AND created_at >= ?", userID, monthStart).
+		Count(&monthCount)
+
+	if monthCount >= models.RateLimitPerMonth {
+		return false, int(monthCount), models.RateLimitPerMonth
+	}
+
+	return true, int(monthCount), models.RateLimitPerMonth
 }

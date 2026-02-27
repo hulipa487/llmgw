@@ -14,12 +14,13 @@
         <div class="nav-links">
             <a href="/user/dashboard">Dashboard</a>
             <a href="/user/keys">API Keys</a>
-            <a href="/user/billing">Billing</a>
+            <a href="/user/models">Models</a>
             <a href="/api/user/logout">Logout</a>
         </div>
     </nav>
     <main class="container">
         <h1>API Keys</h1>
+        <p>You can have up to 10 active API keys.</p>
 
         <div class="card">
             <h2>Create New API Key</h2>
@@ -34,6 +35,7 @@
                 <strong>Save this key! It will only be shown once:</strong>
                 <code id="new-key-value"></code>
             </div>
+            <div id="error-display" class="alert" style="display: none; background-color: #f8d7da; color: #721c24;"></div>
         </div>
 
         <h2>Your API Keys</h2>
@@ -92,6 +94,8 @@
         document.getElementById('create-key-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const name = document.getElementById('key-name').value;
+            const errorDiv = document.getElementById('error-display');
+            errorDiv.style.display = 'none';
 
             try {
                 const response = await fetch('/api/user/keys', {
@@ -108,10 +112,12 @@
                     document.getElementById('key-name').value = '';
                     loadKeys();
                 } else {
-                    alert(data.error || 'Failed to create key');
+                    errorDiv.textContent = data.error || 'Failed to create key';
+                    errorDiv.style.display = 'block';
                 }
             } catch (error) {
-                alert('Network error: ' + error.message);
+                errorDiv.textContent = 'Network error: ' + error.message;
+                errorDiv.style.display = 'block';
             }
         });
 

@@ -49,7 +49,7 @@ func Load(path string) (*Config, error) {
 			cfg.Port = p
 		}
 	}
-	if db := os.Getenv("LLMGW_DB"); db != "" {
+	if db := os.Getenv("DATABASE_URL"); db != "" {
 		cfg.DB = db
 	}
 

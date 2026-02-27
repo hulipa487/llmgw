@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Available Models - LLM Gateway</title>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/models">Models</a>
+            <a href="/api/user/logout">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Available Models</h1>
+
+        <div class="card">
+            <h2>API Endpoints</h2>
+            <p>Use your API key with the following endpoints:</p>
+
+            <h3>OpenAI-Compatible</h3>
+            <code style="display: block; padding: 1rem; background: #f5f5f5; border-radius: 4px; margin-bottom: 1rem;">
+                POST http://localhost:8080/openai/chat/completions<br>
+                GET http://localhost:8080/openai/models
+            </code>
+
+            <h3>Anthropic-Compatible</h3>
+            <code style="display: block; padding: 1rem; background: #f5f5f5; border-radius: 4px; margin-bottom: 1rem;">
+                POST http://localhost:8080/anthropic/v1/messages<br>
+                GET http://localhost:8080/anthropic/v1/models
+            </code>
+
+            <h3>Authentication</h3>
+            <p>Include your API key in the request header:</p>
+            <code style="display: block; padding: 1rem; background: #f5f5f5; border-radius: 4px;">
+                Authorization: Bearer llmgw_xxxxxxxx<br>
+                -- or --<br>
+                x-api-key: llmgw_xxxxxxxx
+            </code>
+        </div>
+
+        <h2>Models</h2>
+        <div class="table-container">
+            <table id="models-table">
+                <thead>
+                    <tr>
+                        <th>Model Name</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+    <script>
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/user/models');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch models');
+                }
+                const models = await response.json();
+
+                const tbody = document.querySelector('#models-table tbody');
+                tbody.innerHTML = '';
+
+                if (models.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="2" style="text-align: center;">No models available yet. Contact your administrator.</td></tr>';
+                    return;
+                }
+
+                models.forEach(m => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td><code>${m.name}</code></td>
+                            <td><span class="badge badge-success">Available</span></td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                console.error('Failed to load models:', error);
+                const tbody = document.querySelector('#models-table tbody');
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center;">Failed to load models.</td></tr>';
+            }
+        }
+
+        loadModels();
+    </script>
+</body>
+</html>

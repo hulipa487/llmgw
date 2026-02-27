@@ -8,9 +8,8 @@ import (
 
 type User struct {
 	ID           uint           `gorm:"primaryKey" json:"id"`
-	Username     string         `gorm:"uniqueIndex;size:255;not null" json:"username"`
+	Email        string         `gorm:"uniqueIndex;size:255;not null" json:"email"`
 	PasswordHash string         `gorm:"size:255;not null" json:"-"`
-	Email        string         `gorm:"size:255" json:"email"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
@@ -32,4 +31,17 @@ type Admin struct {
 
 func (Admin) TableName() string {
 	return "admins"
+}
+
+type InviteCode struct {
+	ID        uint           `gorm:"primaryKey" json:"id"`
+	Code      string         `gorm:"uniqueIndex;size:64;not null" json:"code"`
+	UsedBy    *uint          `json:"used_by,omitempty"`
+	UsedAt    *time.Time     `json:"used_at,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (InviteCode) TableName() string {
+	return "invite_codes"
 }

@@ -110,6 +110,20 @@ func getModelWithUpstream(modelName string) (*ModelWithUpstream, error) {
 func OpenAIChatCompletions(c *gin.Context) {
 	apiKey, _ := middleware.GetCurrentAPIKey(c)
 
+	// Check rate limits
+	if ok, used, limit := CheckRateLimit(apiKey.UserID); !ok {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error": fmt.Sprintf("Rate limit exceeded: %d/%d requests in 6-hour window", used, limit),
+		})
+		return
+	}
+	if ok, used, limit := CheckMonthlyLimit(apiKey.UserID); !ok {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error": fmt.Sprintf("Monthly rate limit exceeded: %d/%d requests this month", used, limit),
+		})
+		return
+	}
+
 	// Read request body
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {

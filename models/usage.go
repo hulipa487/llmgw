@@ -19,3 +19,10 @@ type UsageLog struct {
 func (UsageLog) TableName() string {
 	return "usage_logs"
 }
+
+// Rate limit constants
+const (
+	RateLimitPerWindow  = 800   // requests per 6 hours
+	RateLimitPerMonth   = 9600  // requests per calendar month
+	MaxAPIKeysPerUser   = 10    // max active API keys per user
+)

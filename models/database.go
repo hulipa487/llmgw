@@ -1,7 +1,7 @@
 package models
 
 import (
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -10,7 +10,7 @@ var DB *gorm.DB
 
 func InitDatabase(dsn string) error {
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
@@ -26,6 +26,7 @@ func InitDatabase(dsn string) error {
 		&Model{},
 		&ModelUpstream{},
 		&UsageLog{},
+		&InviteCode{},
 	)
 	if err != nil {
 		return err

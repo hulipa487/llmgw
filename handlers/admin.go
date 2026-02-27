@@ -1,29 +1,80 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"llmgw/models"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
+// ModelUpstreamResponse represents upstream association in API response
+type ModelUpstreamResponse struct {
+	ID               uint   `json:"id"`
+	Name             string `json:"name"`
+	UpstreamID       string `json:"upstream_id"`
+	UpstreamModelName string `json:"upstream_model_name"`
+}
+
+// ModelResponse represents model in API response
+type ModelResponse struct {
+	ID              uint                  `json:"id"`
+	Name            string                `json:"name"`
+	PriceInputPerM  float64               `json:"price_input_per_m"`
+	PriceOutputPerM float64               `json:"price_output_per_m"`
+	IsEnabled       bool                  `json:"is_enabled"`
+	CreatedAt       string                `json:"created_at"`
+	Upstreams       []ModelUpstreamResponse `json:"upstreams"`
+}
+
 // ListModels lists all models (admin)
 func ListModels(c *gin.Context) {
 	var modelList []models.Model
-	if err := models.DB.Preload("Upstreams").Order("name").Find(&modelList).Error; err != nil {
+	if err := models.DB.Order("name").Find(&modelList).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch models"})
 		return
 	}
 
-	c.JSON(http.StatusOK, modelList)
+	var result []ModelResponse
+	for _, m := range modelList {
+		// Get upstream associations with junction table data
+		var upstreamAssocs []models.ModelUpstream
+		models.DB.Where("model_id = ?", m.ID).Find(&upstreamAssocs)
+
+		var upstreams []ModelUpstreamResponse
+		for _, ua := range upstreamAssocs {
+			var upstream models.UpstreamConfig
+			if err := models.DB.First(&upstream, ua.UpstreamConfigID).Error; err == nil {
+				upstreams = append(upstreams, ModelUpstreamResponse{
+					ID:                upstream.ID,
+					Name:              upstream.Name,
+					UpstreamID:        upstream.UpstreamID,
+					UpstreamModelName: ua.UpstreamModelName,
+				})
+			}
+		}
+
+		result = append(result, ModelResponse{
+			ID:              m.ID,
+			Name:            m.Name,
+			PriceInputPerM:  m.PriceInputPerM,
+			PriceOutputPerM: m.PriceOutputPerM,
+			IsEnabled:       m.IsEnabled,
+			CreatedAt:       m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			Upstreams:       upstreams,
+		})
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // CreateModelRequest represents model creation request
 type CreateModelRequest struct {
-	Name            string  `json:"name" binding:"required"`
-	PriceInputPerM  float64 `json:"price_input_per_m"`
-	PriceOutputPerM float64 `json:"price_output_per_m"`
-	IsEnabled       bool    `json:"is_enabled"`
+	Name            string               `json:"name" binding:"required"`
+	PriceInputPerM  float64              `json:"price_input_per_m"`
+	PriceOutputPerM float64              `json:"price_output_per_m"`
+	IsEnabled       bool                 `json:"is_enabled"`
 	Upstreams       []ModelUpstreamInput `json:"upstreams"`
 }
 
@@ -73,17 +124,40 @@ func CreateModel(c *gin.Context) {
 
 	tx.Commit()
 
-	// Reload with associations
-	models.DB.Preload("Upstreams").First(&model, model.ID)
-	c.JSON(http.StatusCreated, model)
+	// Return the created model with upstreams
+	var upstreamAssocs []models.ModelUpstream
+	models.DB.Where("model_id = ?", model.ID).Find(&upstreamAssocs)
+
+	var upstreams []ModelUpstreamResponse
+	for _, ua := range upstreamAssocs {
+		var upstream models.UpstreamConfig
+		if err := models.DB.First(&upstream, ua.UpstreamConfigID).Error; err == nil {
+			upstreams = append(upstreams, ModelUpstreamResponse{
+				ID:                upstream.ID,
+				Name:              upstream.Name,
+				UpstreamID:        upstream.UpstreamID,
+				UpstreamModelName: ua.UpstreamModelName,
+			})
+		}
+	}
+
+	c.JSON(http.StatusCreated, ModelResponse{
+		ID:              model.ID,
+		Name:            model.Name,
+		PriceInputPerM:  model.PriceInputPerM,
+		PriceOutputPerM: model.PriceOutputPerM,
+		IsEnabled:       model.IsEnabled,
+		CreatedAt:       model.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Upstreams:       upstreams,
+	})
 }
 
 // UpdateModelRequest represents model update request
 type UpdateModelRequest struct {
-	Name            *string  `json:"name"`
-	PriceInputPerM  *float64 `json:"price_input_per_m"`
-	PriceOutputPerM *float64 `json:"price_output_per_m"`
-	IsEnabled       *bool    `json:"is_enabled"`
+	Name            *string               `json:"name"`
+	PriceInputPerM  *float64              `json:"price_input_per_m"`
+	PriceOutputPerM *float64              `json:"price_output_per_m"`
+	IsEnabled       *bool                 `json:"is_enabled"`
 	Upstreams       *[]ModelUpstreamInput `json:"upstreams"`
 }
 
@@ -153,9 +227,32 @@ func UpdateModel(c *gin.Context) {
 
 	tx.Commit()
 
-	// Reload with associations
-	models.DB.Preload("Upstreams").First(&model, modelID)
-	c.JSON(http.StatusOK, model)
+	// Return updated model with upstreams
+	var upstreamAssocs []models.ModelUpstream
+	models.DB.Where("model_id = ?", model.ID).Find(&upstreamAssocs)
+
+	var upstreams []ModelUpstreamResponse
+	for _, ua := range upstreamAssocs {
+		var upstream models.UpstreamConfig
+		if err := models.DB.First(&upstream, ua.UpstreamConfigID).Error; err == nil {
+			upstreams = append(upstreams, ModelUpstreamResponse{
+				ID:                upstream.ID,
+				Name:              upstream.Name,
+				UpstreamID:        upstream.UpstreamID,
+				UpstreamModelName: ua.UpstreamModelName,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, ModelResponse{
+		ID:              model.ID,
+		Name:            model.Name,
+		PriceInputPerM:  model.PriceInputPerM,
+		PriceOutputPerM: model.PriceOutputPerM,
+		IsEnabled:       model.IsEnabled,
+		CreatedAt:       model.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		Upstreams:       upstreams,
+	})
 }
 
 // DeleteModel deletes a model
@@ -353,7 +450,6 @@ func ListUsers(c *gin.Context) {
 
 		result = append(result, gin.H{
 			"id":         u.ID,
-			"username":   u.Username,
 			"email":      u.Email,
 			"created_at": u.CreatedAt,
 			"key_count":  keyCount,
@@ -369,38 +465,66 @@ func GetAdminUsage(c *gin.Context) {
 	startDate := c.Query("start_date")
 	endDate := c.Query("end_date")
 
-	query := models.DB.Model(&models.UsageLog{})
-
+	// Build base query
+	baseQuery := models.DB.Model(&models.UsageLog{})
 	if startDate != "" {
-		query = query.Where("created_at >= ?", startDate)
+		baseQuery = baseQuery.Where("created_at >= ?", startDate)
 	}
 	if endDate != "" {
-		query = query.Where("created_at <= ?", endDate+" 23:59:59")
+		baseQuery = baseQuery.Where("created_at <= ?", endDate+" 23:59:59")
 	}
 
 	// Get total stats
 	var totalInput, totalOutput int64
 	var totalCost float64
 	var totalRequests int64
-	query.Select("COALESCE(SUM(input_tokens), 0)").Scan(&totalInput)
-	query.Select("COALESCE(SUM(output_tokens), 0)").Scan(&totalOutput)
-	query.Select("COALESCE(SUM(cost_usd), 0)").Scan(&totalCost)
-	query.Count(&totalRequests)
+
+	inputQuery := models.DB.Model(&models.UsageLog{})
+	outputQuery := models.DB.Model(&models.UsageLog{})
+	costQuery := models.DB.Model(&models.UsageLog{})
+	countQuery := models.DB.Model(&models.UsageLog{})
+
+	if startDate != "" {
+		inputQuery = inputQuery.Where("created_at >= ?", startDate)
+		outputQuery = outputQuery.Where("created_at >= ?", startDate)
+		costQuery = costQuery.Where("created_at >= ?", startDate)
+		countQuery = countQuery.Where("created_at >= ?", startDate)
+	}
+	if endDate != "" {
+		inputQuery = inputQuery.Where("created_at <= ?", endDate+" 23:59:59")
+		outputQuery = outputQuery.Where("created_at <= ?", endDate+" 23:59:59")
+		costQuery = costQuery.Where("created_at <= ?", endDate+" 23:59:59")
+		countQuery = countQuery.Where("created_at <= ?", endDate+" 23:59:59")
+	}
+
+	inputQuery.Select("COALESCE(SUM(input_tokens), 0)").Scan(&totalInput)
+	outputQuery.Select("COALESCE(SUM(output_tokens), 0)").Scan(&totalOutput)
+	costQuery.Select("COALESCE(SUM(cost_usd), 0)").Scan(&totalCost)
+	countQuery.Count(&totalRequests)
 
 	// Get usage by user
 	type UserUsage struct {
 		UserID       uint
-		Username     string
+		Email        string
 		InputTokens  int64
 		OutputTokens int64
 		CostUSD      float64
 		RequestCount int64
 	}
 	var userUsage []UserUsage
-	query.Select("usage_logs.user_id, users.username, SUM(usage_logs.input_tokens) as input_tokens, SUM(usage_logs.output_tokens) as output_tokens, SUM(usage_logs.cost_usd) as cost_usd, COUNT(*) as request_count").
-		Joins("LEFT JOIN users ON usage_logs.user_id = users.id").
-		Group("usage_logs.user_id, users.username").
-		Scan(&userUsage)
+
+	userQuery := models.DB.Table("usage_logs").
+		Select("usage_logs.user_id, users.email, SUM(usage_logs.input_tokens) as input_tokens, SUM(usage_logs.output_tokens) as output_tokens, SUM(usage_logs.cost_usd) as cost_usd, COUNT(*) as request_count").
+		Joins("LEFT JOIN users ON usage_logs.user_id = users.id")
+
+	if startDate != "" {
+		userQuery = userQuery.Where("usage_logs.created_at >= ?", startDate)
+	}
+	if endDate != "" {
+		userQuery = userQuery.Where("usage_logs.created_at <= ?", endDate+" 23:59:59")
+	}
+
+	userQuery.Group("usage_logs.user_id, users.email").Scan(&userUsage)
 
 	// Get usage by model
 	type ModelUsage struct {
@@ -411,7 +535,16 @@ func GetAdminUsage(c *gin.Context) {
 		RequestCount int64
 	}
 	var modelUsage []ModelUsage
-	query.Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost_usd) as cost_usd, COUNT(*) as request_count").
+
+	modelQuery := models.DB.Model(&models.UsageLog{})
+	if startDate != "" {
+		modelQuery = modelQuery.Where("created_at >= ?", startDate)
+	}
+	if endDate != "" {
+		modelQuery = modelQuery.Where("created_at <= ?", endDate+" 23:59:59")
+	}
+
+	modelQuery.Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost_usd) as cost_usd, COUNT(*) as request_count").
 		Group("model_name").
 		Scan(&modelUsage)
 
@@ -425,4 +558,128 @@ func GetAdminUsage(c *gin.Context) {
 		"by_user":  userUsage,
 		"by_model": modelUsage,
 	})
+}
+
+// ListInviteCodes lists all invite codes (admin)
+func ListInviteCodes(c *gin.Context) {
+	var codes []models.InviteCode
+	if err := models.DB.Order("created_at desc").Find(&codes).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch invite codes"})
+		return
+	}
+
+	var result []gin.H
+	for _, code := range codes {
+		item := gin.H{
+			"id":         code.ID,
+			"code":       code.Code,
+			"created_at": code.CreatedAt,
+			"used":       code.UsedBy != nil,
+		}
+		if code.UsedBy != nil {
+			var user models.User
+			if models.DB.First(&user, *code.UsedBy).Error == nil {
+				item["used_by_email"] = user.Email
+			}
+			if code.UsedAt != nil {
+				item["used_at"] = code.UsedAt
+			}
+		}
+		result = append(result, item)
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// CreateInviteCode creates a new invite code
+func CreateInviteCode(c *gin.Context) {
+	code, err := generateInviteCode()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate invite code"})
+		return
+	}
+
+	inviteCode := models.InviteCode{
+		Code: code,
+	}
+
+	if err := models.DB.Create(&inviteCode).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create invite code"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":         inviteCode.ID,
+		"code":       inviteCode.Code,
+		"created_at": inviteCode.CreatedAt,
+	})
+}
+
+// CreateMultipleInviteCodes creates multiple invite codes at once
+func CreateMultipleInviteCodes(c *gin.Context) {
+	var req struct {
+		Count int `json:"count" binding:"required,min=1,max=100"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var codes []models.InviteCode
+	var codeStrings []string
+
+	for i := 0; i < req.Count; i++ {
+		code, err := generateInviteCode()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate invite codes"})
+			return
+		}
+
+		inviteCode := models.InviteCode{
+			Code: code,
+		}
+		codes = append(codes, inviteCode)
+		codeStrings = append(codeStrings, code)
+	}
+
+	if err := models.DB.Create(&codes).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create invite codes"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"count": req.Count,
+		"codes": codeStrings,
+	})
+}
+
+// DeleteInviteCode deletes an unused invite code
+func DeleteInviteCode(c *gin.Context) {
+	codeID := c.Param("id")
+
+	var code models.InviteCode
+	if err := models.DB.First(&code, codeID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Invite code not found"})
+		return
+	}
+
+	if code.UsedBy != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete a used invite code"})
+		return
+	}
+
+	if err := models.DB.Delete(&code).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete invite code"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Invite code deleted"})
+}
+
+func generateInviteCode() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }

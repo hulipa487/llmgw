@@ -25,6 +25,11 @@ func main() {
 		log.Printf("Note: config.json not found, using defaults")
 	}
 
+	// Check for DATABASE_URL
+	if cfg.DB == "" {
+		log.Fatal("DATABASE_URL or db config required")
+	}
+
 	// Initialize database
 	if err := models.InitDatabase(cfg.DB); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
@@ -89,7 +94,6 @@ func main() {
 		apiAuth.POST("/login", handlers.UserLogin)
 		apiAuth.POST("/register", handlers.UserRegister)
 		apiAuth.GET("/logout", handlers.UserLogout)
-		apiAuth.POST("/logout", handlers.UserLogout)
 	}
 
 	// API routes - Admin Auth
@@ -97,7 +101,6 @@ func main() {
 	{
 		apiAdminAuth.POST("/login", handlers.AdminLogin)
 		apiAdminAuth.GET("/logout", handlers.AdminLogout)
-		apiAdminAuth.POST("/logout", handlers.AdminLogout)
 	}
 
 	// Protected web routes - User
@@ -112,9 +115,9 @@ func main() {
 			user, _ := middleware.GetCurrentUser(c)
 			c.HTML(200, "user_keys.html", gin.H{"User": user})
 		})
-		userRoutes.GET("/billing", func(c *gin.Context) {
+		userRoutes.GET("/models", func(c *gin.Context) {
 			user, _ := middleware.GetCurrentUser(c)
-			c.HTML(200, "user_billing.html", gin.H{"User": user})
+			c.HTML(200, "user_models.html", gin.H{"User": user})
 		})
 	}
 
@@ -126,8 +129,13 @@ func main() {
 		apiUser.POST("/keys", handlers.CreateAPIKey)
 		apiUser.DELETE("/keys/:id", handlers.DeleteAPIKey)
 		apiUser.GET("/usage", handlers.GetUserUsage)
-		apiUser.GET("/billing", handlers.GetUserBilling)
+		apiUser.GET("/models", handlers.GetEnabledModels)
 	}
+
+	// Admin routes - entry point redirects to login
+	r.GET("/admin", func(c *gin.Context) {
+		c.Redirect(302, "/admin/login")
+	})
 
 	// Admin login page
 	r.GET("/admin/login", func(c *gin.Context) {
@@ -154,6 +162,10 @@ func main() {
 			admin, _ := middleware.GetCurrentAdmin(c)
 			c.HTML(200, "admin_users.html", gin.H{"Admin": admin})
 		})
+		adminRoutes.GET("/invites", func(c *gin.Context) {
+			admin, _ := middleware.GetCurrentAdmin(c)
+			c.HTML(200, "admin_invites.html", gin.H{"Admin": admin})
+		})
 	}
 
 	// Admin API routes
@@ -170,6 +182,10 @@ func main() {
 		apiAdmin.DELETE("/upstreams/:id", handlers.DeleteUpstream)
 		apiAdmin.GET("/users", handlers.ListUsers)
 		apiAdmin.GET("/usage", handlers.GetAdminUsage)
+		apiAdmin.GET("/invites", handlers.ListInviteCodes)
+		apiAdmin.POST("/invites", handlers.CreateInviteCode)
+		apiAdmin.POST("/invites/batch", handlers.CreateMultipleInviteCodes)
+		apiAdmin.DELETE("/invites/:id", handlers.DeleteInviteCode)
 	}
 
 	// OpenAI-compatible API routes (under /openai)
@@ -181,7 +197,7 @@ func main() {
 		openaiAPI.GET("/models/:model", handlers.OpenAIGetModel)
 	}
 
-	// Anthropic-compatible API routes (under /anthropic)
+	// Anthropic-compatible API routes (under /anthropic/v1)
 	anthropicAPI := r.Group("/anthropic/v1")
 	anthropicAPI.Use(middleware.RequireAPIKey())
 	{
@@ -210,7 +226,6 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	log.Printf("Starting server on %s", addr)
-	log.Printf("Database: %s", cfg.DB)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
