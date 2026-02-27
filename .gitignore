@@ -18,6 +18,7 @@ config.json
 .vscode/
 *.swp
 *.swo
+.claude
 
 # OS
 .DS_Store

@@ -528,17 +528,17 @@ func GetAdminUsage(c *gin.Context) {
 
 	// Get usage by user
 	type UserUsage struct {
-		UserID       uint
-		Email        string
-		InputTokens  int64
-		OutputTokens int64
-		CostUSD      float64
-		RequestCount int64
+		UserID       uint    `json:"user_id"`
+		Email        string  `json:"email"`
+		InputTokens  int64   `json:"input_tokens"`
+		OutputTokens int64   `json:"output_tokens"`
+		CostUSD      float64 `json:"cost_usd"`
+		RequestCount int64   `json:"request_count"`
 	}
 	var userUsage []UserUsage
 
 	userQuery := models.DB.Table("usage_logs").
-		Select("usage_logs.user_id, users.email, SUM(usage_logs.input_tokens) as input_tokens, SUM(usage_logs.output_tokens) as output_tokens, SUM(usage_logs.cost_usd) as cost_usd, COUNT(*) as request_count").
+		Select("usage_logs.user_id, users.email, COALESCE(SUM(usage_logs.input_tokens), 0) as input_tokens, COALESCE(SUM(usage_logs.output_tokens), 0) as output_tokens, COALESCE(SUM(usage_logs.cost_usd), 0) as cost_usd, COUNT(*) as request_count").
 		Joins("LEFT JOIN users ON usage_logs.user_id = users.id")
 
 	if startDate != "" {
@@ -552,15 +552,15 @@ func GetAdminUsage(c *gin.Context) {
 
 	// Get usage by model
 	type ModelUsage struct {
-		ModelName    string
-		InputTokens  int64
-		OutputTokens int64
-		CostUSD      float64
-		RequestCount int64
+		ModelName    string  `json:"model_name"`
+		InputTokens  int64   `json:"input_tokens"`
+		OutputTokens int64   `json:"output_tokens"`
+		CostUSD      float64 `json:"cost_usd"`
+		RequestCount int64   `json:"request_count"`
 	}
 	var modelUsage []ModelUsage
 
-	modelQuery := models.DB.Model(&models.UsageLog{})
+	modelQuery := models.DB.Table("usage_logs")
 	if startDate != "" {
 		modelQuery = modelQuery.Where("created_at >= ?", startDate)
 	}
@@ -568,7 +568,7 @@ func GetAdminUsage(c *gin.Context) {
 		modelQuery = modelQuery.Where("created_at <= ?", endDate+" 23:59:59")
 	}
 
-	modelQuery.Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens, SUM(cost_usd) as cost_usd, COUNT(*) as request_count").
+	modelQuery.Select("model_name, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens, COALESCE(SUM(cost_usd), 0) as cost_usd, COUNT(*) as request_count").
 		Group("model_name").
 		Scan(&modelUsage)
 

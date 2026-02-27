@@ -305,13 +305,13 @@ func GetUserUsage(c *gin.Context) {
 
 	// Get tokens by model this month
 	type ModelTokens struct {
-		ModelName    string
-		InputTokens  int64
-		OutputTokens int64
+		ModelName    string `json:"model_name"`
+		InputTokens  int64  `json:"input_tokens"`
+		OutputTokens int64  `json:"output_tokens"`
 	}
 	var modelTokens []ModelTokens
-	models.DB.Model(&models.UsageLog{}).
-		Select("model_name, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens").
+	models.DB.Table("usage_logs").
+		Select("model_name, COALESCE(SUM(input_tokens), 0) as input_tokens, COALESCE(SUM(output_tokens), 0) as output_tokens").
 		Where("user_id = ? AND created_at >= ?", user.ID, monthStart).
 		Group("model_name").
 		Scan(&modelTokens)
