@@ -20,6 +20,20 @@ func (UsageLog) TableName() string {
 	return "usage_logs"
 }
 
+// APIKeyModelUpstream stores sticky upstream assignment per API key + model
+type APIKeyModelUpstream struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	APIKeyID        uint      `gorm:"not null;uniqueIndex:idx_apikey_model" json:"api_key_id"`
+	ModelID         uint      `gorm:"not null;uniqueIndex:idx_apikey_model" json:"model_id"`
+	UpstreamConfigID uint     `gorm:"not null" json:"upstream_config_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func (APIKeyModelUpstream) TableName() string {
+	return "api_key_model_upstreams"
+}
+
 // Rate limit constants
 const (
 	RateLimitPerWindow  = 800   // requests per 6 hours

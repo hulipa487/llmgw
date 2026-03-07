@@ -102,8 +102,8 @@ func AnthropicMessages(c *gin.Context) {
 		return
 	}
 
-	// Find model and pick random upstream
-	modelWithUpstream, err := getModelWithUpstream(modelName)
+	// Find model and pick sticky upstream for this API key
+	modelWithUpstream, err := getModelWithUpstream(modelName, apiKey.ID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Model '%s' not found or not available", modelName), "type": "error"})
 		return

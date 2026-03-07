@@ -27,6 +27,7 @@ func InitDatabase(dsn string) error {
 		&ModelUpstream{},
 		&UsageLog{},
 		&InviteCode{},
+		&APIKeyModelUpstream{},
 	)
 	if err != nil {
 		return err

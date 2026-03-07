@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"strconv"
 )
 
 type Config struct {
@@ -17,40 +16,31 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{
 		Host: "127.0.0.1",
 		Port: 8080,
-		DB:   "llmgw.db",
+		DB:   "",
 	}
 
 	// Try to load from file
 	file, err := os.Open(path)
-	if err == nil {
-		defer file.Close()
-		var fileCfg Config
-		decoder := json.NewDecoder(file)
-		if err := decoder.Decode(&fileCfg); err == nil {
-			// Override defaults with file values
-			if fileCfg.Host != "" {
-				cfg.Host = fileCfg.Host
-			}
-			if fileCfg.Port != 0 {
-				cfg.Port = fileCfg.Port
-			}
-			if fileCfg.DB != "" {
-				cfg.DB = fileCfg.DB
-			}
-		}
+	if err != nil {
+		return cfg, err
+	}
+	defer file.Close()
+
+	var fileCfg Config
+	decoder := json.NewDecoder(file)
+	if err := decoder.Decode(&fileCfg); err != nil {
+		return cfg, err
 	}
 
-	// Environment variables take precedence
-	if host := os.Getenv("LLMGW_HOST"); host != "" {
-		cfg.Host = host
+	// Override defaults with file values
+	if fileCfg.Host != "" {
+		cfg.Host = fileCfg.Host
 	}
-	if port := os.Getenv("LLMGW_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			cfg.Port = p
-		}
+	if fileCfg.Port != 0 {
+		cfg.Port = fileCfg.Port
 	}
-	if db := os.Getenv("DATABASE_URL"); db != "" {
-		cfg.DB = db
+	if fileCfg.DB != "" {
+		cfg.DB = fileCfg.DB
 	}
 
 	return cfg, nil

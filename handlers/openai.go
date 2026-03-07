@@ -72,13 +72,13 @@ type OpenAIModelsResponse struct {
 
 // ModelWithUpstream holds a model with its upstream and the model name for that upstream
 type ModelWithUpstream struct {
-	Model           models.Model
-	Upstream        models.UpstreamConfig
+	Model             models.Model
+	Upstream          models.UpstreamConfig
 	UpstreamModelName string
 }
 
-// getModelWithUpstream finds a model by name and picks a random upstream
-func getModelWithUpstream(modelName string) (*ModelWithUpstream, error) {
+// getModelWithUpstream finds a model by name and picks an upstream (sticky per API key)
+func getModelWithUpstream(modelName string, apiKeyID uint) (*ModelWithUpstream, error) {
 	var model models.Model
 	if err := models.DB.Where("name = ? AND is_enabled = ?", modelName, true).
 		Preload("Upstreams").First(&model).Error; err != nil {
@@ -89,8 +89,25 @@ func getModelWithUpstream(modelName string) (*ModelWithUpstream, error) {
 		return nil, fmt.Errorf("no upstreams configured for model %s", modelName)
 	}
 
-	// Pick a random upstream
-	upstream := model.Upstreams[rand.Intn(len(model.Upstreams))]
+	var upstream models.UpstreamConfig
+
+	// Check for existing sticky assignment
+	var stickyMapping models.APIKeyModelUpstream
+	err := models.DB.Where("api_key_id = ? AND model_id = ?", apiKeyID, model.ID).
+		First(&stickyMapping).Error
+
+	if err == nil {
+		// Found existing mapping, use that upstream
+		if err := models.DB.First(&upstream, stickyMapping.UpstreamConfigID).Error; err != nil {
+			// Upstream no longer exists, create new mapping
+			upstream = selectRandomUpstream(model.Upstreams)
+			saveStickyMapping(apiKeyID, model.ID, upstream.ID)
+		}
+	} else {
+		// No existing mapping, pick random and save
+		upstream = selectRandomUpstream(model.Upstreams)
+		saveStickyMapping(apiKeyID, model.ID, upstream.ID)
+	}
 
 	// Get the upstream model name from the junction table
 	var modelUpstream models.ModelUpstream
@@ -104,6 +121,24 @@ func getModelWithUpstream(modelName string) (*ModelWithUpstream, error) {
 		Upstream:          upstream,
 		UpstreamModelName: modelUpstream.UpstreamModelName,
 	}, nil
+}
+
+// selectRandomUpstream picks a random upstream from the list
+func selectRandomUpstream(upstreams []models.UpstreamConfig) models.UpstreamConfig {
+	return upstreams[rand.Intn(len(upstreams))]
+}
+
+// saveStickyMapping saves the API key -> model -> upstream mapping
+func saveStickyMapping(apiKeyID, modelID, upstreamID uint) {
+	mapping := models.APIKeyModelUpstream{
+		APIKeyID:         apiKeyID,
+		ModelID:          modelID,
+		UpstreamConfigID: upstreamID,
+	}
+	// Use upsert to handle concurrent requests
+	models.DB.Where("api_key_id = ? AND model_id = ?", apiKeyID, modelID).
+		Assign(models.APIKeyModelUpstream{UpstreamConfigID: upstreamID}).
+		FirstOrCreate(&mapping)
 }
 
 // OpenAIChatCompletions handles OpenAI-compatible chat completions
@@ -145,8 +180,8 @@ func OpenAIChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// Find model and pick random upstream
-	modelWithUpstream, err := getModelWithUpstream(modelName)
+	// Find model and pick sticky upstream for this API key
+	modelWithUpstream, err := getModelWithUpstream(modelName, apiKey.ID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Model '%s' not found or not available", modelName)})
 		return
