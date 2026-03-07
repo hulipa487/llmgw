@@ -2,8 +2,6 @@ package models
 
 import (
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type Model struct {
@@ -14,7 +12,6 @@ type Model struct {
 	IsEnabled       bool             `gorm:"default:true;index" json:"is_enabled"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt   `gorm:"index" json:"-"`
 	Upstreams       []UpstreamConfig `gorm:"many2many:model_upstreams;joinForeignKey:ModelID;joinReferencesForeignKey:UpstreamConfigID" json:"upstreams,omitempty"`
 }
 
