@@ -145,20 +145,6 @@ func saveStickyMapping(apiKeyID, modelID, upstreamID uint) {
 func OpenAIChatCompletions(c *gin.Context) {
 	apiKey, _ := middleware.GetCurrentAPIKey(c)
 
-	// Check rate limits
-	if ok, used, limit := CheckRateLimit(apiKey.UserID); !ok {
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": fmt.Sprintf("Rate limit exceeded: %d/%d requests in 6-hour window", used, limit),
-		})
-		return
-	}
-	if ok, used, limit := CheckMonthlyLimit(apiKey.UserID); !ok {
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"error": fmt.Sprintf("Monthly rate limit exceeded: %d/%d requests this month", used, limit),
-		})
-		return
-	}
-
 	// Read request body
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -195,8 +181,8 @@ func OpenAIChatCompletions(c *gin.Context) {
 		return
 	}
 
-	// Build upstream URL using OpenAI path
-	upstreamURL := fmt.Sprintf("%s%s/chat/completions", modelWithUpstream.Upstream.BaseURL, modelWithUpstream.Upstream.OpenAIPath)
+	// Build upstream URL using API path
+	upstreamURL := fmt.Sprintf("%s%s/chat/completions", modelWithUpstream.Upstream.BaseURL, modelWithUpstream.Upstream.APIPath)
 
 	// Create upstream request
 	upstreamReq, err := http.NewRequest("POST", upstreamURL, bytes.NewBuffer(modifiedBody))
@@ -261,7 +247,7 @@ func OpenAIChatCompletions(c *gin.Context) {
 	}
 }
 
-func handleOpenAIStream(c *gin.Context, resp *http.Response, apiKeyID, userID uint, model models.Model, latencyMs int64) {
+func handleOpenAIStream(c *gin.Context, resp *http.Response, apiKeyID uint, userID int64, model models.Model, latencyMs int64) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -363,7 +349,7 @@ func OpenAIGetModel(c *gin.Context) {
 	})
 }
 
-func logUsage(apiKeyID, userID uint, modelName string,
+func logUsage(apiKeyID uint, userID int64, modelName string,
 	inputTokens, outputTokens int, latencyMs int64, priceIn, priceOut float64) {
 	// Calculate cost
 	costUSD := (float64(inputTokens)/1000000)*priceIn + (float64(outputTokens)/1000000)*priceOut

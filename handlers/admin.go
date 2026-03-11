@@ -287,13 +287,12 @@ func DeleteModel(c *gin.Context) {
 
 // UpstreamResponse represents upstream in API response (without key)
 type UpstreamResponse struct {
-	ID            uint   `json:"id"`
-	UpstreamID    string `json:"upstream_id"`
-	Name          string `json:"name"`
-	BaseURL       string `json:"base_url"`
-	OpenAIPath    string `json:"openai_path"`
-	AnthropicPath string `json:"anthropic_path"`
-	HasKey        bool   `json:"has_key"`
+	ID         uint   `json:"id"`
+	UpstreamID string `json:"upstream_id"`
+	Name       string `json:"name"`
+	BaseURL    string `json:"base_url"`
+	APIPath    string `json:"api_path"`
+	HasKey     bool   `json:"has_key"`
 }
 
 // ListUpstreams lists all upstreams
@@ -307,13 +306,12 @@ func ListUpstreams(c *gin.Context) {
 	var result []UpstreamResponse
 	for _, u := range upstreams {
 		result = append(result, UpstreamResponse{
-			ID:            u.ID,
-			UpstreamID:    u.UpstreamID,
-			Name:          u.Name,
-			BaseURL:       u.BaseURL,
-			OpenAIPath:    u.OpenAIPath,
-			AnthropicPath: u.AnthropicPath,
-			HasKey:        u.Key != "",
+			ID:         u.ID,
+			UpstreamID: u.UpstreamID,
+			Name:       u.Name,
+			BaseURL:    u.BaseURL,
+			APIPath:    u.APIPath,
+			HasKey:     u.Key != "",
 		})
 	}
 
@@ -322,12 +320,11 @@ func ListUpstreams(c *gin.Context) {
 
 // CreateUpstreamRequest represents upstream creation request
 type CreateUpstreamRequest struct {
-	UpstreamID    string `json:"upstream_id" binding:"required"`
-	Name          string `json:"name" binding:"required"`
-	BaseURL       string `json:"base_url" binding:"required"`
-	OpenAIPath    string `json:"openai_path"`
-	AnthropicPath string `json:"anthropic_path"`
-	Key           string `json:"key" binding:"required"`
+	UpstreamID string `json:"upstream_id" binding:"required"`
+	Name       string `json:"name" binding:"required"`
+	BaseURL    string `json:"base_url" binding:"required"`
+	APIPath    string `json:"api_path"`
+	Key        string `json:"key" binding:"required"`
 }
 
 // CreateUpstream creates a new upstream
@@ -338,12 +335,9 @@ func CreateUpstream(c *gin.Context) {
 		return
 	}
 
-	// Set defaults
-	if req.OpenAIPath == "" {
-		req.OpenAIPath = "/v1"
-	}
-	if req.AnthropicPath == "" {
-		req.AnthropicPath = "/v1"
+	// Set default API path
+	if req.APIPath == "" {
+		req.APIPath = "/v1"
 	}
 
 	// Check if upstream_id already exists
@@ -354,12 +348,11 @@ func CreateUpstream(c *gin.Context) {
 	}
 
 	upstream := models.UpstreamConfig{
-		UpstreamID:    req.UpstreamID,
-		Name:          req.Name,
-		BaseURL:       req.BaseURL,
-		OpenAIPath:    req.OpenAIPath,
-		AnthropicPath: req.AnthropicPath,
-		Key:           req.Key,
+		UpstreamID: req.UpstreamID,
+		Name:       req.Name,
+		BaseURL:    req.BaseURL,
+		APIPath:    req.APIPath,
+		Key:        req.Key,
 	}
 
 	if err := models.DB.Create(&upstream).Error; err != nil {
@@ -372,12 +365,11 @@ func CreateUpstream(c *gin.Context) {
 
 // UpdateUpstreamRequest represents upstream update request
 type UpdateUpstreamRequest struct {
-	UpstreamID    *string `json:"upstream_id"`
-	Name          *string `json:"name"`
-	BaseURL       *string `json:"base_url"`
-	OpenAIPath    *string `json:"openai_path"`
-	AnthropicPath *string `json:"anthropic_path"`
-	Key           *string `json:"key"`
+	UpstreamID *string `json:"upstream_id"`
+	Name       *string `json:"name"`
+	BaseURL    *string `json:"base_url"`
+	APIPath    *string `json:"api_path"`
+	Key        *string `json:"key"`
 }
 
 // UpdateUpstream updates an upstream
@@ -406,11 +398,8 @@ func UpdateUpstream(c *gin.Context) {
 	if req.BaseURL != nil {
 		updates["base_url"] = *req.BaseURL
 	}
-	if req.OpenAIPath != nil {
-		updates["openai_path"] = *req.OpenAIPath
-	}
-	if req.AnthropicPath != nil {
-		updates["anthropic_path"] = *req.AnthropicPath
+	if req.APIPath != nil {
+		updates["api_path"] = *req.APIPath
 	}
 	if req.Key != nil {
 		updates["key"] = *req.Key
@@ -474,7 +463,8 @@ func ListUsers(c *gin.Context) {
 
 		result = append(result, gin.H{
 			"id":         u.ID,
-			"email":      u.Email,
+			"username":   u.Username,
+			"role":       u.Role,
 			"created_at": u.CreatedAt,
 			"key_count":  keyCount,
 		})
@@ -528,8 +518,8 @@ func GetAdminUsage(c *gin.Context) {
 
 	// Get usage by user
 	type UserUsage struct {
-		UserID       uint    `json:"user_id"`
-		Email        string  `json:"email"`
+		UserID       int64   `json:"user_id"`
+		Username     string  `json:"username"`
 		InputTokens  int64   `json:"input_tokens"`
 		OutputTokens int64   `json:"output_tokens"`
 		CostUSD      float64 `json:"cost_usd"`
@@ -538,7 +528,7 @@ func GetAdminUsage(c *gin.Context) {
 	var userUsage []UserUsage
 
 	userQuery := models.DB.Table("usage_logs").
-		Select("usage_logs.user_id, users.email, COALESCE(SUM(usage_logs.input_tokens), 0) as input_tokens, COALESCE(SUM(usage_logs.output_tokens), 0) as output_tokens, COALESCE(SUM(usage_logs.cost_usd), 0) as cost_usd, COUNT(*) as request_count").
+		Select("usage_logs.user_id, users.username, COALESCE(SUM(usage_logs.input_tokens), 0) as input_tokens, COALESCE(SUM(usage_logs.output_tokens), 0) as output_tokens, COALESCE(SUM(usage_logs.cost_usd), 0) as cost_usd, COUNT(*) as request_count").
 		Joins("LEFT JOIN users ON usage_logs.user_id = users.id")
 
 	if startDate != "" {
@@ -548,7 +538,7 @@ func GetAdminUsage(c *gin.Context) {
 		userQuery = userQuery.Where("usage_logs.created_at <= ?", endDate+" 23:59:59")
 	}
 
-	userQuery.Group("usage_logs.user_id, users.email").Scan(&userUsage)
+	userQuery.Group("usage_logs.user_id, users.username").Scan(&userUsage)
 
 	// Get usage by model
 	type ModelUsage struct {
@@ -584,124 +574,9 @@ func GetAdminUsage(c *gin.Context) {
 	})
 }
 
-// ListInviteCodes lists all invite codes (admin)
-func ListInviteCodes(c *gin.Context) {
-	var codes []models.InviteCode
-	if err := models.DB.Order("created_at desc").Find(&codes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch invite codes"})
-		return
-	}
-
-	var result []gin.H
-	for _, code := range codes {
-		item := gin.H{
-			"id":         code.ID,
-			"code":       code.Code,
-			"created_at": code.CreatedAt,
-			"used":       code.UsedBy != nil,
-		}
-		if code.UsedBy != nil {
-			var user models.User
-			if models.DB.First(&user, *code.UsedBy).Error == nil {
-				item["used_by_email"] = user.Email
-			}
-			if code.UsedAt != nil {
-				item["used_at"] = code.UsedAt
-			}
-		}
-		result = append(result, item)
-	}
-
-	c.JSON(http.StatusOK, result)
-}
-
-// CreateInviteCode creates a new invite code
-func CreateInviteCode(c *gin.Context) {
-	code, err := generateInviteCode()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate invite code"})
-		return
-	}
-
-	inviteCode := models.InviteCode{
-		Code: code,
-	}
-
-	if err := models.DB.Create(&inviteCode).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create invite code"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"id":         inviteCode.ID,
-		"code":       inviteCode.Code,
-		"created_at": inviteCode.CreatedAt,
-	})
-}
-
-// CreateMultipleInviteCodes creates multiple invite codes at once
-func CreateMultipleInviteCodes(c *gin.Context) {
-	var req struct {
-		Count int `json:"count" binding:"required,min=1,max=100"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	var codes []models.InviteCode
-	var codeStrings []string
-
-	for i := 0; i < req.Count; i++ {
-		code, err := generateInviteCode()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate invite codes"})
-			return
-		}
-
-		inviteCode := models.InviteCode{
-			Code: code,
-		}
-		codes = append(codes, inviteCode)
-		codeStrings = append(codeStrings, code)
-	}
-
-	if err := models.DB.Create(&codes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create invite codes"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"count": req.Count,
-		"codes": codeStrings,
-	})
-}
-
-// DeleteInviteCode deletes an unused invite code
-func DeleteInviteCode(c *gin.Context) {
-	codeID := c.Param("id")
-
-	var code models.InviteCode
-	if err := models.DB.First(&code, codeID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Invite code not found"})
-		return
-	}
-
-	if code.UsedBy != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete a used invite code"})
-		return
-	}
-
-	if err := models.DB.Delete(&code).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete invite code"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Invite code deleted"})
-}
-
-func generateInviteCode() (string, error) {
-	bytes := make([]byte, 16)
+// generateRandomHex generates random hex string
+func generateRandomHex(length int) (string, error) {
+	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
 	}

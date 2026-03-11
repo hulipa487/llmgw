@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"llmgw/config"
@@ -12,7 +10,6 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -34,33 +31,18 @@ func main() {
 		log.Fatal("db config required in config file")
 	}
 
+	// Check for required MTFPass URL
+	if cfg.MTFPassURL == "" {
+		log.Fatal("mtfpass_url config required in config file")
+	}
+
 	// Initialize database
 	if err := models.InitDatabase(cfg.DB); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// Create default admin if not exists
-	var adminCount int64
-	models.DB.Model(&models.Admin{}).Count(&adminCount)
-	if adminCount == 0 {
-		password, err := generateRandomPassword()
-		if err != nil {
-			log.Fatalf("Failed to generate admin password: %v", err)
-		}
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		admin := models.Admin{
-			Username:     "admin",
-			PasswordHash: string(hashedPassword),
-		}
-		if err := models.DB.Create(&admin).Error; err != nil {
-			log.Fatalf("Failed to create admin: %v", err)
-		}
-		fmt.Printf("\n========================================\n")
-		fmt.Printf("  ADMIN CREDENTIALS (SAVE THIS!)\n")
-		fmt.Printf("  Username: admin\n")
-		fmt.Printf("  Password: %s\n", password)
-		fmt.Printf("========================================\n\n")
-	}
+	// Initialize MTFPass client
+	middleware.InitMTFPassClient(cfg.MTFPassURL)
 
 	// Setup Gin
 	r := gin.New()
@@ -74,28 +56,15 @@ func main() {
 		}
 	})
 
-	// Session middleware
-	r.Use(handlers.SessionMiddleware())
-
-	// API routes - User Auth (public)
-	apiUserAuth := r.Group("/api/user")
-	{
-		apiUserAuth.POST("/login", handlers.UserLogin)
-		apiUserAuth.POST("/register", handlers.UserRegister)
-		apiUserAuth.GET("/logout", handlers.UserLogout)
-	}
-
-	// API routes - Admin Auth (public)
-	apiAdminAuth := r.Group("/api/admin")
-	{
-		apiAdminAuth.POST("/login", handlers.AdminLogin)
-		apiAdminAuth.GET("/logout", handlers.AdminLogout)
-	}
+	// Public routes
+	r.GET("/api/auth/check", handlers.CheckAuth)
+	r.GET("/api/auth/logout", handlers.Logout)
 
 	// Protected API routes - User
 	apiUser := r.Group("/api/user")
 	apiUser.Use(middleware.RequireAuth())
 	{
+		apiUser.GET("/me", handlers.GetCurrentUser)
 		apiUser.GET("/keys", handlers.ListAPIKeys)
 		apiUser.POST("/keys", handlers.CreateAPIKey)
 		apiUser.DELETE("/keys/:id", handlers.DeleteAPIKey)
@@ -117,13 +86,9 @@ func main() {
 		apiAdmin.DELETE("/upstreams/:id", handlers.DeleteUpstream)
 		apiAdmin.GET("/users", handlers.ListUsers)
 		apiAdmin.GET("/usage", handlers.GetAdminUsage)
-		apiAdmin.GET("/invites", handlers.ListInviteCodes)
-		apiAdmin.POST("/invites", handlers.CreateInviteCode)
-		apiAdmin.POST("/invites/batch", handlers.CreateMultipleInviteCodes)
-		apiAdmin.DELETE("/invites/:id", handlers.DeleteInviteCode)
 	}
 
-	// OpenAI-compatible API routes (under /openai)
+	// OpenAI-compatible API routes
 	openaiAPI := r.Group("/openai")
 	openaiAPI.Use(middleware.RequireAPIKey())
 	{
@@ -132,13 +97,20 @@ func main() {
 		openaiAPI.GET("/models/:model", handlers.OpenAIGetModel)
 	}
 
-	// Anthropic-compatible API routes (under /anthropic/v1)
-	anthropicAPI := r.Group("/anthropic/v1")
+	// OpenAI top-level models endpoint (for compatibility)
+	r.GET("/models", middleware.RequireAPIKey(), handlers.OpenAIListModels)
+
+	// OpenAI to Anthropic converter routes
+	// Accepts OpenAI format, converts to Anthropic format for upstream
+	anthropicAPI := r.Group("/anthropic")
 	anthropicAPI.Use(middleware.RequireAPIKey())
 	{
-		anthropicAPI.POST("/messages", handlers.AnthropicMessages)
+		anthropicAPI.POST("/messages", handlers.OpenAIToAnthropic)
 		anthropicAPI.GET("/models", handlers.AnthropicListModels)
 	}
+
+	// Anthropic top-level models endpoint (for compatibility)
+	r.GET("/anthropic/models", middleware.RequireAPIKey(), handlers.AnthropicListModels)
 
 	// Start server
 	host := cfg.Host
@@ -146,15 +118,8 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	log.Printf("Starting server on %s", addr)
+	log.Printf("MTFPass URL: %s", cfg.MTFPassURL)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
-}
-
-func generateRandomPassword() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
 }

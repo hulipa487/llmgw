@@ -9,8 +9,7 @@ type UpstreamConfig struct {
 	UpstreamID    string    `gorm:"uniqueIndex;size:255;not null" json:"upstream_id"`
 	Name          string    `gorm:"size:255;not null" json:"name"`
 	BaseURL       string    `gorm:"size:512;not null" json:"base_url"`
-	OpenAIPath    string    `gorm:"size:255;not null;default:'/v1'" json:"openai_path"`
-	AnthropicPath string    `gorm:"size:255;not null;default:'/v1'" json:"anthropic_path"`
+	APIPath       string    `gorm:"size:255;not null;default:'/v1'" json:"api_path"`
 	Key           string    `gorm:"size:255;not null" json:"key"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

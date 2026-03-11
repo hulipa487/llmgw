@@ -7,7 +7,7 @@ import (
 type APIKey struct {
 	ID         uint       `gorm:"primaryKey" json:"id"`
 	KeyHash    string     `gorm:"uniqueIndex;size:255;not null" json:"-"`
-	UserID     uint       `gorm:"not null;index" json:"user_id"`
+	UserID     int64      `gorm:"not null;index" json:"user_id"` // Telegram ID
 	User       User       `gorm:"foreignKey:UserID" json:"-"`
 	Name       string     `gorm:"size:255" json:"name"`
 	KeyPrefix  string     `gorm:"size:8" json:"key_prefix"` // First few chars for display

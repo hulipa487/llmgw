@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API Keys - LLM Gateway</title>
-    <link href="/static/style.css" rel="stylesheet">
+    <link href="/static/style.css?v=2" rel="stylesheet">
+    <script src="/static/theme.js?v=2"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -15,7 +16,8 @@
             <a href="/user/dashboard">Dashboard</a>
             <a href="/user/keys">API Keys</a>
             <a href="/user/models">Models</a>
-            <a href="/api/user/logout">Logout</a>
+            <a href="/admin/dashboard" id="admin-link" style="display: none;">Admin Panel</a>
+            <a href="/api/auth/logout">Logout</a>
         </div>
     </nav>
     <main class="container">
@@ -35,7 +37,7 @@
                 <strong>Save this key! It will only be shown once:</strong>
                 <code id="new-key-value"></code>
             </div>
-            <div id="error-display" class="alert" style="display: none; background-color: #f8d7da; color: #721c24;"></div>
+            <div id="error-display" class="alert alert-danger" style="display: none;"></div>
         </div>
 
         <h2>Your API Keys</h2>
@@ -56,6 +58,20 @@
         </div>
     </main>
     <script>
+        async function checkAdmin() {
+            try {
+                const response = await fetch('/api/user/me');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.role === 'admin') {
+                        document.getElementById('admin-link').style.display = 'inline-block';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to check admin status:', error);
+            }
+        }
+
         async function loadKeys() {
             try {
                 const response = await fetch('/api/user/keys');
@@ -142,6 +158,7 @@
             }
         }
 
+        checkAdmin();
         loadKeys();
     </script>
 </body>

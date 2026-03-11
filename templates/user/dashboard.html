@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - LLM Gateway</title>
+    <link href="/static/style.css?v=2" rel="stylesheet">
+    <script src="/static/theme.js?v=2"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">LLM Gateway</a>
+        </div>
+        <div class="nav-links">
+            <a href="/user/dashboard">Dashboard</a>
+            <a href="/user/keys">API Keys</a>
+            <a href="/user/models">Models</a>
+            <a href="/admin/dashboard" id="admin-link" style="display: none;">Admin Panel</a>
+            <a href="/api/auth/logout" id="logout-link">Logout</a>
+        </div>
+    </nav>
+    <main class="container">
+        <h1>Dashboard</h1>
+        <p>Welcome, <span id="user-name">Loading...</span>!</p>
+
+        <h2>Credits</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Available Credits</h3>
+                <p class="stat-value" id="credits-value">Loading...</p>
+                <p class="stat-label" id="credits-label"></p>
+            </div>
+            <div class="stat-card">
+                <h3>Requests This Month</h3>
+                <p class="stat-value" id="requests-month">Loading...</p>
+            </div>
+        </div>
+
+        <h2>Tokens by Model (This Month)</h2>
+        <div class="table-container">
+            <table id="tokens-table">
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Input Tokens</th>
+                        <th>Output Tokens</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </main>
+    <script>
+        async function loadUser() {
+            try {
+                const response = await fetch('/api/user/me');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('user-name').textContent = data.username || 'User';
+
+                    // Show admin link if user is admin
+                    if (data.role === 'admin') {
+                        document.getElementById('admin-link').style.display = 'inline-block';
+                    }
+                } else {
+                    // Redirect to login page
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('Failed to load user:', error);
+            }
+        }
+
+        async function loadUsage() {
+            try {
+                const response = await fetch('/api/user/usage');
+                const data = await response.json();
+
+                // Update credits
+                if (data.credits.unlimited) {
+                    document.getElementById('credits-value').textContent = 'Unlimited';
+                    document.getElementById('credits-label').textContent = 'Admin account';
+                } else {
+                    document.getElementById('credits-value').textContent = data.credits.remaining;
+                    document.getElementById('credits-label').textContent = 'credits remaining';
+                }
+
+                // Update requests
+                document.getElementById('requests-month').textContent = data.usage.requests_this_month;
+
+                // Update tokens table
+                const tbody = document.querySelector('#tokens-table tbody');
+                tbody.innerHTML = '';
+                if (data.tokens_by_model && data.tokens_by_model.length > 0) {
+                    data.tokens_by_model.forEach(row => {
+                        tbody.innerHTML += `
+                            <tr>
+                                <td>${row.model_name}</td>
+                                <td>${row.input_tokens.toLocaleString()}</td>
+                                <td>${row.output_tokens.toLocaleString()}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="3" style="text-align: center;">No usage data yet</td></tr>';
+                }
+            } catch (error) {
+                console.error('Failed to load usage:', error);
+            }
+        }
+
+        loadUsage();
+        loadUser();
+    </script>
+</body>
+</html>

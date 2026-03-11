@@ -20,13 +20,11 @@ func InitDatabase(dsn string) error {
 	// Auto migrate
 	err = DB.AutoMigrate(
 		&User{},
-		&Admin{},
 		&APIKey{},
 		&UpstreamConfig{},
 		&Model{},
 		&ModelUpstream{},
 		&UsageLog{},
-		&InviteCode{},
 		&APIKeyModelUpstream{},
 	)
 	if err != nil {

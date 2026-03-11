@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // hashKey creates a SHA256 hash of an API key
@@ -29,167 +28,9 @@ func generateAPIKey() (string, error) {
 	return "llmgw_" + hex.EncodeToString(bytes), nil
 }
 
-// generateRandomPassword generates a random password
-func generateRandomPassword() (string, error) {
-	bytes := make([]byte, 16)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-// UserLoginRequest represents login request
-type UserLoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
-}
-
-// UserRegisterRequest represents registration request
-type UserRegisterRequest struct {
-	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required,min=6"`
-	InviteCode string `json:"invite_code" binding:"required"`
-}
-
 // CreateAPIKeyRequest represents API key creation request
 type CreateAPIKeyRequest struct {
 	Name string `json:"name" binding:"max=100"`
-}
-
-// UserLogin handles user login
-func UserLogin(c *gin.Context) {
-	var req UserLoginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-		return
-	}
-
-	var user models.User
-	if err := models.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-		return
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-		return
-	}
-
-	// Set session
-	c.SetCookie("session", fmt.Sprintf("%d", user.ID), 3600*24*7, "/", "", false, true)
-	c.SetCookie("userID", fmt.Sprintf("%d", user.ID), 3600*24*7, "/", "", false, true)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Login successful", "user": gin.H{
-		"id":    user.ID,
-		"email": user.Email,
-	}})
-}
-
-// UserRegister handles user registration
-func UserRegister(c *gin.Context) {
-	var req UserRegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Check invite code
-	var inviteCode models.InviteCode
-	if err := models.DB.Where("code = ? AND used_by IS NULL", req.InviteCode).First(&inviteCode).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or already used invite code"})
-		return
-	}
-
-	// Check if email exists
-	var existingUser models.User
-	if models.DB.Where("email = ?", req.Email).First(&existingUser).Error == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
-		return
-	}
-
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
-		return
-	}
-
-	// Start transaction
-	tx := models.DB.Begin()
-
-	user := models.User{
-		Email:        req.Email,
-		PasswordHash: string(hashedPassword),
-	}
-
-	if err := tx.Create(&user).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
-		return
-	}
-
-	// Mark invite code as used
-	now := time.Now()
-	inviteCode.UsedBy = &user.ID
-	inviteCode.UsedAt = &now
-	if err := tx.Save(&inviteCode).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update invite code"})
-		return
-	}
-
-	tx.Commit()
-
-	c.JSON(http.StatusCreated, gin.H{"message": "User created successfully", "user": gin.H{
-		"id":    user.ID,
-		"email": user.Email,
-	}})
-}
-
-// UserLogout handles user logout
-func UserLogout(c *gin.Context) {
-	c.SetCookie("session", "", -1, "/", "", false, true)
-	c.SetCookie("userID", "", -1, "/", "", false, true)
-	c.Redirect(http.StatusFound, "/login")
-}
-
-// AdminLogin handles admin login
-func AdminLogin(c *gin.Context) {
-	var req struct {
-		Username string `json:"username" binding:"required"`
-		Password string `json:"password" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-		return
-	}
-
-	var admin models.Admin
-	if err := models.DB.Where("username = ?", req.Username).First(&admin).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-		return
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-		return
-	}
-
-	// Set admin session
-	c.SetCookie("adminSession", fmt.Sprintf("%d", admin.ID), 3600*24*7, "/", "", false, true)
-	c.SetCookie("adminID", fmt.Sprintf("%d", admin.ID), 3600*24*7, "/", "", false, true)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Login successful", "admin": gin.H{
-		"id":       admin.ID,
-		"username": admin.Username,
-	}})
-}
-
-// AdminLogout handles admin logout
-func AdminLogout(c *gin.Context) {
-	c.SetCookie("adminSession", "", -1, "/", "", false, true)
-	c.SetCookie("adminID", "", -1, "/", "", false, true)
-	c.Redirect(http.StatusFound, "/admin/login")
 }
 
 // CreateAPIKey creates a new API key for the user
@@ -289,16 +130,13 @@ func DeleteAPIKey(c *gin.Context) {
 // GetUserUsage gets usage statistics for the user
 func GetUserUsage(c *gin.Context) {
 	user, _ := middleware.GetCurrentUser(c)
+	mtfUser, _ := middleware.GetMTFPassUser(c)
 
 	now := time.Now()
-	windowStart := now.Add(-6 * time.Hour)
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
-	// Get request counts
-	var windowRequests, monthRequests int64
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ? AND created_at >= ?", user.ID, windowStart).
-		Count(&windowRequests)
+	// Get request count this month
+	var monthRequests int64
 	models.DB.Model(&models.UsageLog{}).
 		Where("user_id = ? AND created_at >= ?", user.ID, monthStart).
 		Count(&monthRequests)
@@ -317,19 +155,12 @@ func GetUserUsage(c *gin.Context) {
 		Scan(&modelTokens)
 
 	c.JSON(http.StatusOK, gin.H{
-		"rate_limits": gin.H{
-			"window": gin.H{
-				"limit":     models.RateLimitPerWindow,
-				"used":      windowRequests,
-				"remaining": max(0, models.RateLimitPerWindow-int(windowRequests)),
-				"percent":   float64(windowRequests) / float64(models.RateLimitPerWindow) * 100,
-			},
-			"month": gin.H{
-				"limit":     models.RateLimitPerMonth,
-				"used":      monthRequests,
-				"remaining": max(0, models.RateLimitPerMonth-int(monthRequests)),
-				"percent":   float64(monthRequests) / float64(models.RateLimitPerMonth) * 100,
-			},
+		"credits": gin.H{
+			"remaining": mtfUser.Credits,
+			"unlimited": mtfUser.HasUnlimitedCredits(),
+		},
+		"usage": gin.H{
+			"requests_this_month": monthRequests,
 		},
 		"tokens_by_model": modelTokens,
 	})
@@ -353,68 +184,63 @@ func GetEnabledModels(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+// GetCurrentUser returns the current logged-in user info
+func GetCurrentUser(c *gin.Context) {
+	user, exists := middleware.GetCurrentUser(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
 	}
-	return b
+
+	mtfUser, _ := middleware.GetMTFPassUser(c)
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       user.ID,
+		"username": user.Username,
+		"role":     user.Role,
+		"credits":  mtfUser.Credits,
+	})
 }
 
-// SessionMiddleware extracts session from cookie
-func SessionMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Check for user session
-		userIDStr, err := c.Cookie("userID")
-		if err == nil && userIDStr != "" {
-			var userID uint
-			if _, err := fmt.Sscanf(userIDStr, "%d", &userID); err == nil {
-				c.Set("userID", userID)
-			}
-		}
-
-		// Check for admin session
-		adminIDStr, err := c.Cookie("adminID")
-		if err == nil && adminIDStr != "" {
-			var adminID uint
-			if _, err := fmt.Sscanf(adminIDStr, "%d", &adminID); err == nil {
-				c.Set("adminID", adminID)
-			}
-		}
-
-		c.Next()
+// Logout calls MTFPass logout API and clears the auth cookie
+func Logout(c *gin.Context) {
+	// Get the current token to logout from MTFPass
+	jwtToken, err := c.Cookie("mtf_auth")
+	if err == nil && jwtToken != "" {
+		// Call MTFPass logout API (best effort)
+		middleware.MTFPassClient.Logout(jwtToken)
 	}
+
+	// Clear the mtf_auth cookie with correct domain
+	c.SetCookie("mtf_auth", "", -1, "/", "mtf.edu.ci", true, true)
+
+	// Redirect to MTFPass login with origin
+	origin := "https://" + c.Request.Host
+	c.Redirect(http.StatusFound, middleware.MTFPassClient.BaseURL+"/auth/login?origin="+origin)
 }
 
-// CheckRateLimit checks if user has exceeded rate limit
-func CheckRateLimit(userID uint) (bool, int, int) {
-	now := time.Now()
-	windowStart := now.Add(-6 * time.Hour)
-
-	var windowCount int64
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ? AND created_at >= ?", userID, windowStart).
-		Count(&windowCount)
-
-	if windowCount >= models.RateLimitPerWindow {
-		return false, int(windowCount), models.RateLimitPerWindow
+// CheckAuth checks if user is authenticated and returns user info
+// This endpoint is used by nginx auth_request
+func CheckAuth(c *gin.Context) {
+	jwtToken, err := c.Cookie("mtf_auth")
+	if err != nil || jwtToken == "" {
+		// Clear any existing cookie and return 401
+		c.SetCookie("mtf_auth", "", -1, "/", "mtf.edu.ci", true, true)
+		c.Status(http.StatusUnauthorized)
+		return
 	}
 
-	return true, int(windowCount), models.RateLimitPerWindow
-}
-
-// CheckMonthlyLimit checks if user has exceeded monthly limit
-func CheckMonthlyLimit(userID uint) (bool, int, int) {
-	now := time.Now()
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-
-	var monthCount int64
-	models.DB.Model(&models.UsageLog{}).
-		Where("user_id = ? AND created_at >= ?", userID, monthStart).
-		Count(&monthCount)
-
-	if monthCount >= models.RateLimitPerMonth {
-		return false, int(monthCount), models.RateLimitPerMonth
+	// Validate with MTFPass
+	mtfUser, err := middleware.MTFPassClient.ValidateToken(jwtToken)
+	if err != nil {
+		// Clear invalid cookie and return 401
+		c.SetCookie("mtf_auth", "", -1, "/", "mtf.edu.ci", true, true)
+		c.Status(http.StatusUnauthorized)
+		return
 	}
 
-	return true, int(monthCount), models.RateLimitPerMonth
+	// Set headers for nginx to use with auth_request_set
+	c.Header("X-Auth-User-Id", fmt.Sprintf("%d", mtfUser.UID))
+	c.Header("X-Auth-Role", mtfUser.Role)
+	c.Status(http.StatusOK)
 }

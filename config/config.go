@@ -6,17 +6,18 @@ import (
 )
 
 type Config struct {
-	Host string `json:"host"`
-	Port int    `json:"port"`
-	DB   string `json:"db"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	DB         string `json:"db"`
+	MTFPassURL string `json:"mtfpass_url"`
 }
 
 func Load(path string) (*Config, error) {
 	// Start with defaults
 	cfg := &Config{
-		Host: "127.0.0.1",
-		Port: 8080,
-		DB:   "",
+		Host:   "127.0.0.1",
+		Port:   8080,
+		DB:     "",
 	}
 
 	// Try to load from file
@@ -41,6 +42,9 @@ func Load(path string) (*Config, error) {
 	}
 	if fileCfg.DB != "" {
 		cfg.DB = fileCfg.DB
+	}
+	if fileCfg.MTFPassURL != "" {
+		cfg.MTFPassURL = fileCfg.MTFPassURL
 	}
 
 	return cfg, nil

@@ -7,7 +7,7 @@ import (
 type UsageLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	APIKeyID     uint      `gorm:"not null;index" json:"api_key_id"`
-	UserID       uint      `gorm:"not null;index" json:"user_id"`
+	UserID       int64     `gorm:"not null;index" json:"user_id"` // Telegram ID
 	ModelName    string    `gorm:"size:255;not null;index" json:"model_name"`
 	InputTokens  int       `gorm:"not null" json:"input_tokens"`
 	OutputTokens int       `gorm:"not null" json:"output_tokens"`
@@ -34,9 +34,5 @@ func (APIKeyModelUpstream) TableName() string {
 	return "api_key_model_upstreams"
 }
 
-// Rate limit constants
-const (
-	RateLimitPerWindow  = 800   // requests per 6 hours
-	RateLimitPerMonth   = 9600  // requests per calendar month
-	MaxAPIKeysPerUser   = 10    // max active API keys per user
-)
+// MaxAPIKeysPerUser is the maximum number of active API keys per user
+const MaxAPIKeysPerUser = 10
