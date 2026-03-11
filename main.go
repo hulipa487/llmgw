@@ -100,13 +100,12 @@ func main() {
 	// OpenAI top-level models endpoint (for compatibility)
 	r.GET("/models", middleware.RequireAPIKey(), handlers.OpenAIListModels)
 
-	// OpenAI to Anthropic converter routes
+	// Anthropic-compatible API routes
 	// Accepts Anthropic format, converts to OpenAI format for upstream
-	anthropicAPI := r.Group("/anthropic")
+	anthropicAPI := r.Group("/anthropic/v1")
 	anthropicAPI.Use(middleware.RequireAPIKey())
 	{
 		anthropicAPI.POST("/messages", handlers.AnthropicToOpenAI)
-		anthropicAPI.GET("/models", handlers.AnthropicListModels)
 	}
 
 	// Start server
