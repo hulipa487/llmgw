@@ -23,6 +23,11 @@ type AnthropicMessagesRequest struct {
 	System      interface{}        `json:"system,omitempty"`
 	Temperature float64            `json:"temperature,omitempty"`
 	Stream      bool               `json:"stream,omitempty"`
+	StreamOptions *StreamOptions   `json:"stream_options,omitempty"`
+}
+
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type AnthropicMessage struct {
@@ -61,8 +66,41 @@ type AnthropicModel struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
-// OpenAIToAnthropic converts OpenAI chat request to Anthropic format and forwards to upstream
-func OpenAIToAnthropic(c *gin.Context) {
+// AnthropicEvent represents Anthropic streaming events
+type AnthropicEvent struct {
+	Type         string          `json:"type"`
+	Message      *AnthropicMessageStream `json:"message,omitempty"`
+	Delta        *AnthropicDelta `json:"delta,omitempty"`
+	Usage        *AnthropicUsage `json:"usage,omitempty"`
+	Index        int             `json:"index,omitempty"`
+	ContentBlock *AnthropicContentBlock `json:"content_block,omitempty"`
+}
+
+type AnthropicMessageStream struct {
+	ID           string        `json:"id"`
+	Type         string        `json:"type"`
+	Role         string        `json:"role"`
+	Content      []interface{} `json:"content"`
+	Model        string        `json:"model"`
+	StopReason   *string       `json:"stop_reason,omitempty"`
+	StopSequence *string       `json:"stop_sequence,omitempty"`
+	Usage        *AnthropicUsage `json:"usage,omitempty"`
+}
+
+type AnthropicDelta struct {
+	Type         string `json:"type"`
+	Text         string `json:"text"`
+	StopReason   *string `json:"stop_reason,omitempty"`
+	StopSequence *string `json:"stop_sequence,omitempty"`
+}
+
+type AnthropicContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// AnthropicToOpenAI handles Anthropic-style requests and converts to OpenAI upstream
+func AnthropicToOpenAI(c *gin.Context) {
 	apiKey, _ := middleware.GetCurrentAPIKey(c)
 
 	// Read request body
@@ -73,46 +111,51 @@ func OpenAIToAnthropic(c *gin.Context) {
 	}
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-	// Parse OpenAI request
-	var openaiReq OpenAIChatRequest
-	if err := json.Unmarshal(bodyBytes, &openaiReq); err != nil {
+	// Parse Anthropic request
+	var anthropicReq AnthropicMessagesRequest
+	if err := json.Unmarshal(bodyBytes, &anthropicReq); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON", "type": "error"})
 		return
 	}
 
 	// Find model and upstream
-	modelWithUpstream, err := getModelWithUpstream(openaiReq.Model, apiKey.ID)
+	modelWithUpstream, err := getModelWithUpstream(anthropicReq.Model, apiKey.ID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Model '%s' not found or not available", openaiReq.Model), "type": "error"})
+		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Model '%s' not found or not available", anthropicReq.Model), "type": "error"})
 		return
 	}
 
-	// Convert OpenAI messages to Anthropic format
-	anthropicReq := convertOpenAIToAnthropic(openaiReq)
+	// Convert Anthropic messages to OpenAI format
+	openaiReq := convertAnthropicToOpenAIRequest(anthropicReq)
 
-	// Marshal Anthropic request
-	anthropicBody, err := json.Marshal(anthropicReq)
+	// Marshal OpenAI request
+	openaiBody, err := json.Marshal(openaiReq)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to convert request", "type": "error"})
 		return
 	}
 
-	// Build upstream URL (Anthropic-compatible endpoint)
-	upstreamURL := fmt.Sprintf("%s%s/messages", modelWithUpstream.Upstream.BaseURL, modelWithUpstream.Upstream.APIPath)
+	// Build upstream URL (OpenAI-compatible endpoint)
+	upstreamURL := fmt.Sprintf("%s%s/chat/completions", modelWithUpstream.Upstream.BaseURL, modelWithUpstream.Upstream.APIPath)
 
 	// Create upstream request
-	upstreamReq, err := http.NewRequest("POST", upstreamURL, bytes.NewBuffer(anthropicBody))
+	upstreamReq, err := http.NewRequest("POST", upstreamURL, bytes.NewBuffer(openaiBody))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upstream request", "type": "error"})
 		return
 	}
 
-	// Set headers for Anthropic API
+	// Set headers for OpenAI API
 	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("x-api-key", modelWithUpstream.Upstream.Key)
-	upstreamReq.Header.Set("anthropic-version", "2023-06-01")
+	upstreamReq.Header.Set("Authorization", "Bearer "+modelWithUpstream.Upstream.Key)
 
 	startTime := time.Now()
+
+	// Handle streaming
+	if anthropicReq.Stream {
+		handleAnthropicStreaming(c, upstreamReq, apiKey, modelWithUpstream, startTime)
+		return
+	}
 
 	// Send request
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -132,159 +175,29 @@ func OpenAIToAnthropic(c *gin.Context) {
 		return
 	}
 
-	// Convert Anthropic response to OpenAI format
-	openaiResp := convertAnthropicToOpenAI(respBody, modelWithUpstream.Model.Name)
+	// Convert OpenAI response to Anthropic format
+	anthropicResp := convertOpenAIToAnthropicResponse(respBody, modelWithUpstream.Model.Name)
 
-	// Write OpenAI-formatted response
+	// Write Anthropic-formatted response
 	c.Status(resp.StatusCode)
 	c.Header("Content-Type", "application/json")
-	c.Writer.Write(openaiResp)
+	c.Writer.Write(anthropicResp)
 
 	// Log usage if successful
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var antResp AnthropicMessagesResponse
-		if err := json.Unmarshal(respBody, &antResp); err == nil {
-			if antResp.Usage.InputTokens > 0 || antResp.Usage.OutputTokens > 0 {
+		var oiResp OpenAIChatResponse
+		if err := json.Unmarshal(respBody, &oiResp); err == nil {
+			if oiResp.Usage.PromptTokens > 0 || oiResp.Usage.CompletionTokens > 0 {
 				logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
-					antResp.Usage.InputTokens, antResp.Usage.OutputTokens,
+					oiResp.Usage.PromptTokens, oiResp.Usage.CompletionTokens,
 					latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
 			}
 		}
 	}
 }
 
-// convertOpenAIToAnthropic converts OpenAI chat request to Anthropic messages format
-func convertOpenAIToAnthropic(openaiReq OpenAIChatRequest) AnthropicMessagesRequest {
-	var messages []AnthropicMessage
-	var systemMsg interface{}
-
-	for _, msg := range openaiReq.Messages {
-		switch msg.Role {
-		case "system":
-			systemMsg = msg.Content
-		case "assistant":
-			messages = append(messages, AnthropicMessage{
-				Role:    "assistant",
-				Content: msg.Content,
-			})
-		case "user":
-			messages = append(messages, AnthropicMessage{
-				Role:    "user",
-				Content: msg.Content,
-			})
-		}
-	}
-
-	return AnthropicMessagesRequest{
-		Model:       openaiReq.Model,
-		MaxTokens:   openaiReq.MaxTokens,
-		Messages:    messages,
-		System:      systemMsg,
-		Temperature: openaiReq.Temperature,
-		Stream:      openaiReq.Stream,
-	}
-}
-
-// convertAnthropicToOpenAI converts Anthropic response to OpenAI chat format
-func convertAnthropicToOpenAI(anthropicBody []byte, modelName string) []byte {
-	var antResp AnthropicMessagesResponse
-	if err := json.Unmarshal(anthropicBody, &antResp); err != nil {
-		// If parsing fails, return original
-		return anthropicBody
-	}
-
-	// Combine content into single text
-	var contentText string
-	for _, c := range antResp.Content {
-		if c.Type == "text" {
-			contentText += c.Text
-		}
-	}
-
-	openaiResp := OpenAIChatResponse{
-		ID:      antResp.ID,
-		Object:  "chat.completion",
-		Created: time.Now().Unix(),
-		Model:   modelName,
-		Choices: []OpenAIChoice{
-			{
-				Index: 0,
-				Message: OpenAIMessage{
-					Role:    "assistant",
-					Content: contentText,
-				},
-				FinishReason: "stop",
-			},
-		},
-		Usage: OpenAIUsage{
-			PromptTokens:     antResp.Usage.InputTokens,
-			CompletionTokens: antResp.Usage.OutputTokens,
-			TotalTokens:      antResp.Usage.InputTokens + antResp.Usage.OutputTokens,
-		},
-	}
-
-	result, _ := json.Marshal(openaiResp)
-	return result
-}
-
-// StreamOpenAIToAnthropic handles streaming conversion from OpenAI to Anthropic format
-func StreamOpenAIToAnthropic(c *gin.Context) {
-	apiKey, _ := middleware.GetCurrentAPIKey(c)
-
-	// Read request body
-	bodyBytes, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read request body", "type": "error"})
-		return
-	}
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-	// Parse OpenAI request
-	var openaiReq OpenAIChatRequest
-	if err := json.Unmarshal(bodyBytes, &openaiReq); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON", "type": "error"})
-		return
-	}
-
-	if !openaiReq.Stream {
-		// Not a streaming request, use regular handler
-		OpenAIToAnthropic(c)
-		return
-	}
-
-	// Find model and upstream
-	modelWithUpstream, err := getModelWithUpstream(openaiReq.Model, apiKey.ID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Model '%s' not found or not available", openaiReq.Model), "type": "error"})
-		return
-	}
-
-	// Convert OpenAI messages to Anthropic format
-	anthropicReq := convertOpenAIToAnthropic(openaiReq)
-
-	// Marshal Anthropic request
-	anthropicBody, err := json.Marshal(anthropicReq)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to convert request", "type": "error"})
-		return
-	}
-
-	// Build upstream URL
-	upstreamURL := fmt.Sprintf("%s%s/messages", modelWithUpstream.Upstream.BaseURL, modelWithUpstream.Upstream.APIPath)
-
-	// Create upstream request
-	upstreamReq, err := http.NewRequest("POST", upstreamURL, bytes.NewBuffer(anthropicBody))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upstream request", "type": "error"})
-		return
-	}
-
-	upstreamReq.Header.Set("Content-Type", "application/json")
-	upstreamReq.Header.Set("x-api-key", modelWithUpstream.Upstream.Key)
-	upstreamReq.Header.Set("anthropic-version", "2023-06-01")
-
-	startTime := time.Now()
-
+// handleAnthropicStreaming handles streaming requests from Anthropic to OpenAI upstream
+func handleAnthropicStreaming(c *gin.Context, upstreamReq *http.Request, apiKey *models.APIKey, modelWithUpstream *ModelWithUpstream, startTime time.Time) {
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
@@ -295,7 +208,7 @@ func StreamOpenAIToAnthropic(c *gin.Context) {
 
 	latencyMs := time.Since(startTime).Milliseconds()
 
-	// Set up streaming response
+	// Set up streaming response headers for Anthropic SSE
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
@@ -310,6 +223,15 @@ func StreamOpenAIToAnthropic(c *gin.Context) {
 	reader := bufio.NewReader(resp.Body)
 	var contentBuilder strings.Builder
 	var inputTokens, outputTokens int
+	messageID := fmt.Sprintf("msg_%d", time.Now().UnixNano())
+
+	// Send message_start event
+	c.Writer.Write([]byte(fmt.Sprintf("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"%s\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"%s\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n", messageID, modelWithUpstream.Model.Name)))
+	flusher.Flush()
+
+	// Send content_block_start event
+	c.Writer.Write([]byte("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"))
+	flusher.Flush()
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -320,42 +242,51 @@ func StreamOpenAIToAnthropic(c *gin.Context) {
 			break
 		}
 
-		if strings.HasPrefix(line, "event: ") {
-			continue // Skip event type lines
-		}
-
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
+			data = strings.TrimSpace(data)
 
-			// Parse Anthropic delta
-			if strings.Contains(data, "content_block_delta") || strings.Contains(data, "content_block_start") {
-				var event map[string]interface{}
-				if json.Unmarshal([]byte(data), &event) == nil {
-					if delta, ok := event["delta"].(map[string]interface{}); ok {
-						if text, ok := delta["text"].(string); ok && text != "" {
-							contentBuilder.WriteString(text)
-						}
-					}
-					if usage, ok := event["usage"].(map[string]interface{}); ok {
-						if it, ok := usage["input_tokens"].(float64); ok {
-							inputTokens = int(it)
-						}
-						if ot, ok := usage["output_tokens"].(float64); ok {
-							outputTokens = int(ot)
-						}
-					}
-				}
+			if data == "[DONE]" {
+				continue
 			}
 
-			// Convert to OpenAI streaming format and forward
-			openaiChunk := createOpenAIStreamingChunk(contentBuilder.String(), modelWithUpstream.Model.Name)
-			c.Writer.Write([]byte(openaiChunk))
-			flusher.Flush()
+			// Parse OpenAI streaming chunk
+			var chunk OpenAIChatResponse
+			if err := json.Unmarshal([]byte(data), &chunk); err == nil {
+				if len(chunk.Choices) > 0 && chunk.Choices[0].Delta != nil {
+					deltaText := chunk.Choices[0].Delta.Content
+					if deltaText != "" {
+						contentBuilder.WriteString(deltaText)
+
+						// Send delta event
+						event := fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%s\"}}\n\n", escapeJson(deltaText))
+						c.Writer.Write([]byte(event))
+						flusher.Flush()
+					}
+				}
+
+				// Extract usage if available
+				if chunk.Usage.PromptTokens > 0 {
+					inputTokens = chunk.Usage.PromptTokens
+				}
+				if chunk.Usage.CompletionTokens > 0 {
+					outputTokens = chunk.Usage.CompletionTokens
+				}
+			}
 		}
 	}
 
-	// Send final chunk
-	c.Writer.Write([]byte("data: [DONE]\n\n"))
+	// Send content_block_stop event
+	c.Writer.Write([]byte("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"))
+	flusher.Flush()
+
+	// Send message_delta with stop_reason
+	stopReason := "end_turn"
+	c.Writer.Write([]byte(fmt.Sprintf("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"%s\"},\"usage\":{\"output_tokens\":%d}}\n\n", stopReason, outputTokens)))
+	flusher.Flush()
+
+	// Send message_stop event
+	c.Writer.Write([]byte("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
 	flusher.Flush()
 
 	// Log usage
@@ -366,29 +297,87 @@ func StreamOpenAIToAnthropic(c *gin.Context) {
 	}
 }
 
-// createOpenAIStreamingChunk creates an OpenAI-compatible streaming chunk
-func createOpenAIStreamingChunk(content string, modelName string) string {
-	chunk := OpenAIChatResponse{
-		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().Unix()),
-		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
-		Model:   modelName,
-		Choices: []OpenAIChoice{
+// convertAnthropicToOpenAIRequest converts Anthropic request to OpenAI format
+func convertAnthropicToOpenAIRequest(anthropicReq AnthropicMessagesRequest) OpenAIChatRequest {
+	var messages []OpenAIMessage
+
+	// Add system message if present
+	if anthropicReq.System != nil {
+		if sysStr, ok := anthropicReq.System.(string); ok {
+			messages = append(messages, OpenAIMessage{
+				Role:    "system",
+				Content: sysStr,
+			})
+		}
+	}
+
+	// Convert messages
+	for _, msg := range anthropicReq.Messages {
+		messages = append(messages, OpenAIMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	return OpenAIChatRequest{
+		Model:       anthropicReq.Model,
+		Messages:    messages,
+		MaxTokens:   anthropicReq.MaxTokens,
+		Temperature: anthropicReq.Temperature,
+		Stream:      anthropicReq.Stream,
+	}
+}
+
+// convertOpenAIToAnthropicResponse converts OpenAI response to Anthropic format
+func convertOpenAIToAnthropicResponse(openaiBody []byte, modelName string) []byte {
+	var oiResp OpenAIChatResponse
+	if err := json.Unmarshal(openaiBody, &oiResp); err != nil {
+		// If parsing fails, return original
+		return openaiBody
+	}
+
+	// Extract content from choices
+	var contentText string
+	if len(oiResp.Choices) > 0 {
+		if content, ok := oiResp.Choices[0].Message.Content.(string); ok {
+			contentText = content
+		}
+	}
+
+	stopReason := "end_turn"
+	anthropicResp := AnthropicMessagesResponse{
+		ID:   fmt.Sprintf("msg_%s", oiResp.ID),
+		Type: "message",
+		Role: "assistant",
+		Content: []AnthropicContent{
 			{
-				Index: 0,
-				Delta: &OpenAIDelta{
-					Content: content,
-				},
-				FinishReason: "",
+				Type: "text",
+				Text: contentText,
 			},
+		},
+		Model: modelName,
+		StopReason: &stopReason,
+		Usage: AnthropicUsage{
+			InputTokens:  oiResp.Usage.PromptTokens,
+			OutputTokens: oiResp.Usage.CompletionTokens,
 		},
 	}
 
-	data, _ := json.Marshal(chunk)
-	return fmt.Sprintf("data: %s\n\n", string(data))
+	result, _ := json.Marshal(anthropicResp)
+	return result
 }
 
-// AnthropicListModels lists available models (same as OpenAI)
+// escapeJson escapes special characters for JSON string
+func escapeJson(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
+}
+
+// AnthropicListModels lists available models
 func AnthropicListModels(c *gin.Context) {
 	var modelList []models.Model
 	if err := models.DB.Where("is_enabled = ?", true).Find(&modelList).Error; err != nil {

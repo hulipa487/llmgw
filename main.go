@@ -101,11 +101,11 @@ func main() {
 	r.GET("/models", middleware.RequireAPIKey(), handlers.OpenAIListModels)
 
 	// OpenAI to Anthropic converter routes
-	// Accepts OpenAI format, converts to Anthropic format for upstream
+	// Accepts Anthropic format, converts to OpenAI format for upstream
 	anthropicAPI := r.Group("/anthropic")
 	anthropicAPI.Use(middleware.RequireAPIKey())
 	{
-		anthropicAPI.POST("/messages", handlers.OpenAIToAnthropic)
+		anthropicAPI.POST("/messages", handlers.AnthropicToOpenAI)
 		anthropicAPI.GET("/models", handlers.AnthropicListModels)
 	}
 
