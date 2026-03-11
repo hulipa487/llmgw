@@ -109,9 +109,6 @@ func main() {
 		anthropicAPI.GET("/models", handlers.AnthropicListModels)
 	}
 
-	// Anthropic top-level models endpoint (for compatibility)
-	r.GET("/anthropic/models", middleware.RequireAPIKey(), handlers.AnthropicListModels)
-
 	// Start server
 	host := cfg.Host
 	port := cfg.Port
