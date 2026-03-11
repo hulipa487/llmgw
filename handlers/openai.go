@@ -18,17 +18,42 @@ import (
 
 // OpenAI request/response structures
 type OpenAIChatRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []OpenAIMessage        `json:"messages"`
-	MaxTokens   int                    `json:"max_tokens,omitempty"`
-	Temperature float64                `json:"temperature,omitempty"`
-	Stream      bool                   `json:"stream,omitempty"`
-	Extra       map[string]interface{} `json:"-"` // Additional fields
+	Model       string          `json:"model"`
+	Messages    []OpenAIMessage `json:"messages"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	Stream      *bool           `json:"stream,omitempty"`
+	Tools       []OpenAITool    `json:"tools,omitempty"`
 }
 
 type OpenAIMessage struct {
-	Role    string      `json:"role"`
-	Content interface{} `json:"content"`
+	Role         string           `json:"role"`
+	Content      interface{}      `json:"content,omitempty"`
+	ToolCalls    []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID   string           `json:"tool_call_id,omitempty"`
+	Name         string           `json:"name,omitempty"`
+}
+
+type OpenAIToolCall struct {
+	ID       string               `json:"id,omitempty"`
+	Type     string               `json:"type"`
+	Function OpenAIFunctionCall  `json:"function"`
+}
+
+type OpenAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type OpenAITool struct {
+	Type     string            `json:"type"`
+	Function OpenAIFunctionDef `json:"function"`
+}
+
+type OpenAIFunctionDef struct {
+	Name        string                            `json:"name"`
+	Description string                            `json:"description,omitempty"`
+	Parameters  map[string]interface{}            `json:"parameters,omitempty"`
 }
 
 type OpenAIChatResponse struct {
@@ -48,8 +73,9 @@ type OpenAIChoice struct {
 }
 
 type OpenAIDelta struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content,omitempty"`
+	Role      string           `json:"role,omitempty"`
+	Content   string           `json:"content,omitempty"`
+	ToolCalls []OpenAIToolCall `json:"tool_calls,omitempty"`
 }
 
 type OpenAIUsage struct {
