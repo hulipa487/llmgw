@@ -126,7 +126,8 @@ func AnthropicToOpenAI(c *gin.Context) {
 	}
 
 	// Convert Anthropic messages to OpenAI format
-	openaiReq := convertAnthropicToOpenAIRequest(anthropicReq)
+	// Use the upstream model name for the request
+	openaiReq := convertAnthropicToOpenAIRequest(anthropicReq, modelWithUpstream.UpstreamModelName)
 
 	// Marshal OpenAI request
 	openaiBody, err := json.Marshal(openaiReq)
@@ -175,6 +176,18 @@ func AnthropicToOpenAI(c *gin.Context) {
 		return
 	}
 
+	// Handle non-200 responses - pass through errors
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Try to extract error message from upstream response
+		var errResp map[string]interface{}
+		if json.Unmarshal(respBody, &errResp) == nil {
+			c.JSON(resp.StatusCode, errResp)
+			return
+		}
+		c.JSON(resp.StatusCode, gin.H{"error": string(respBody), "type": "error"})
+		return
+	}
+
 	// Convert OpenAI response to Anthropic format
 	anthropicResp := convertOpenAIToAnthropicResponse(respBody, modelWithUpstream.Model.Name)
 
@@ -184,14 +197,12 @@ func AnthropicToOpenAI(c *gin.Context) {
 	c.Writer.Write(anthropicResp)
 
 	// Log usage if successful
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var oiResp OpenAIChatResponse
-		if err := json.Unmarshal(respBody, &oiResp); err == nil {
-			if oiResp.Usage.PromptTokens > 0 || oiResp.Usage.CompletionTokens > 0 {
-				logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
-					oiResp.Usage.PromptTokens, oiResp.Usage.CompletionTokens,
-					latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
-			}
+	var oiResp OpenAIChatResponse
+	if err := json.Unmarshal(respBody, &oiResp); err == nil {
+		if oiResp.Usage.PromptTokens > 0 || oiResp.Usage.CompletionTokens > 0 {
+			logUsage(apiKey.ID, apiKey.UserID, modelWithUpstream.Model.Name,
+				oiResp.Usage.PromptTokens, oiResp.Usage.CompletionTokens,
+				latencyMs, modelWithUpstream.Model.PriceInputPerM, modelWithUpstream.Model.PriceOutputPerM)
 		}
 	}
 }
@@ -298,7 +309,7 @@ func handleAnthropicStreaming(c *gin.Context, upstreamReq *http.Request, apiKey 
 }
 
 // convertAnthropicToOpenAIRequest converts Anthropic request to OpenAI format
-func convertAnthropicToOpenAIRequest(anthropicReq AnthropicMessagesRequest) OpenAIChatRequest {
+func convertAnthropicToOpenAIRequest(anthropicReq AnthropicMessagesRequest, upstreamModelName string) OpenAIChatRequest {
 	var messages []OpenAIMessage
 
 	// Add system message if present
@@ -320,7 +331,7 @@ func convertAnthropicToOpenAIRequest(anthropicReq AnthropicMessagesRequest) Open
 	}
 
 	return OpenAIChatRequest{
-		Model:       anthropicReq.Model,
+		Model:       upstreamModelName, // Use upstream model name
 		Messages:    messages,
 		MaxTokens:   anthropicReq.MaxTokens,
 		Temperature: anthropicReq.Temperature,
@@ -332,15 +343,29 @@ func convertAnthropicToOpenAIRequest(anthropicReq AnthropicMessagesRequest) Open
 func convertOpenAIToAnthropicResponse(openaiBody []byte, modelName string) []byte {
 	var oiResp OpenAIChatResponse
 	if err := json.Unmarshal(openaiBody, &oiResp); err != nil {
-		// If parsing fails, return original
-		return openaiBody
+		// If parsing fails, return error response in Anthropic format
+		return []byte(fmt.Sprintf(`{"type":"error","error":{"message":"Failed to parse upstream response: %s"}}`, err.Error()))
 	}
 
 	// Extract content from choices
 	var contentText string
 	if len(oiResp.Choices) > 0 {
-		if content, ok := oiResp.Choices[0].Message.Content.(string); ok {
-			contentText = content
+		content := oiResp.Choices[0].Message.Content
+		switch v := content.(type) {
+		case string:
+			contentText = v
+		case []interface{}:
+			// Handle multi-part content (extract text from first text part)
+			for _, part := range v {
+				if partMap, ok := part.(map[string]interface{}); ok {
+					if partMap["type"] == "text" {
+						if text, ok := partMap["text"].(string); ok {
+							contentText = text
+							break
+						}
+					}
+				}
+			}
 		}
 	}
 
